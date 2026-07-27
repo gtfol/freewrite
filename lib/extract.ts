@@ -2,7 +2,7 @@ import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import sanitizeHtml from "sanitize-html";
 
-import type { ExtractedArticle } from "@/lib/types";
+import type { ExtractedArticle, ExtractSource } from "@/lib/types";
 
 export class ExtractError extends Error {}
 
@@ -149,11 +149,22 @@ function sanitizeContent(html: string, baseUrl: string): string {
 }
 
 function countWords(html: string): number {
-  const text = html
+  return visibleText(html).split(/\s+/).filter(Boolean).length;
+}
+
+function visibleText(html: string): string {
+  return html
+    .replace(/<(script|style|noscript)[^>]*>[\s\S]*?<\/\1>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&[a-z#0-9]+;/gi, " ")
     .trim();
-  return text ? text.split(/\s+/).length : 0;
+}
+
+function looksLikeJsShell(html: string): boolean {
+  return (
+    visibleText(html).length < 500 &&
+    (html.match(/<script/gi)?.length ?? 0) > 0
+  );
 }
 
 function parseReadable(
@@ -168,6 +179,11 @@ function parseReadable(
   const result = reader.parse();
 
   if (!result?.content) {
+    if (looksLikeJsShell(html)) {
+      throw new ExtractError(
+        "That page is a JavaScript app — it has no static text to pull. The rendered copy usually works."
+      );
+    }
     throw new ExtractError("Couldn't find readable content on that page");
   }
 
@@ -259,17 +275,55 @@ async function extractArxiv(url: URL, id: string): Promise<ExtractedArticle> {
   return { ...article, siteName: article.siteName ?? "arXiv" };
 }
 
+async function extractRendered(url: URL): Promise<ExtractedArticle> {
+  const headers: Record<string, string> = {
+    "user-agent": USER_AGENT,
+    "x-return-format": "html",
+  };
+  if (process.env.JINA_API_KEY) {
+    headers.authorization = `Bearer ${process.env.JINA_API_KEY}`;
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`https://r.jina.ai/${url.href}`, {
+      headers,
+      signal: AbortSignal.timeout(45_000),
+    });
+  } catch {
+    throw new ExtractError("The rendering service didn't respond in time");
+  }
+  if (res.status === 429) {
+    throw new ExtractError(
+      "The rendering service is rate-limited right now — wait a minute and try again"
+    );
+  }
+  if (!res.ok) {
+    throw new ExtractError(`The rendering service responded with ${res.status}`);
+  }
+
+  const html = await res.text();
+  if (html.length > MAX_HTML_BYTES) {
+    throw new ExtractError("That page is too large to parse");
+  }
+  return parseReadable(html, url.href, url.href);
+}
+
 export async function extract(
   rawUrl: string,
-  useArchive: boolean
+  source: ExtractSource
 ): Promise<ExtractedArticle> {
   const url = normalizeUrl(rawUrl);
 
-  if (useArchive) {
+  if (source === "archive") {
     const { html, finalUrl } = await fetchHtml(
       `https://archive.ph/newest/${url.href}`
     );
     return parseReadable(html, finalUrl, url.href);
+  }
+
+  if (source === "render") {
+    return extractRendered(url);
   }
 
   if (TWEET_PATTERN.test(url.href)) {

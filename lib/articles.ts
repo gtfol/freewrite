@@ -1,4 +1,9 @@
-import type { Article, ExtractedArticle } from "@/lib/types";
+import type {
+  Article,
+  ArticleVia,
+  ExtractedArticle,
+  ExtractSource,
+} from "@/lib/types";
 
 const dateFormat = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -22,10 +27,17 @@ export function articleSite(article: Article): string {
   }
 }
 
-export function toArticle(
-  data: ExtractedArticle,
-  via: "archive" | null
-): Article {
+export function sourceToVia(source: ExtractSource): ArticleVia {
+  return source === "direct" ? null : source;
+}
+
+export function viaLabel(via: ArticleVia): string | null {
+  if (via === "archive") return "via archive.ph";
+  if (via === "render") return "via r.jina.ai";
+  return null;
+}
+
+export function toArticle(data: ExtractedArticle, via: ArticleVia): Article {
   return {
     id: crypto.randomUUID(),
     ...data,
@@ -35,14 +47,19 @@ export function toArticle(
   };
 }
 
+export function articleText(article: Article): string {
+  const doc = new DOMParser().parseFromString(article.content, "text/html");
+  return (doc.body.textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
 export async function requestExtract(
   url: string,
-  archive: boolean
+  source: ExtractSource
 ): Promise<ExtractedArticle> {
   const res = await fetch("/api/extract", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ url, archive }),
+    body: JSON.stringify({ url, source }),
   });
   const body = await res.json().catch(() => null);
   if (!res.ok) {

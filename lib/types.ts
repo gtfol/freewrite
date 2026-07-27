@@ -5,6 +5,10 @@ export interface Entry {
   content: string;
 }
 
+export type ExtractSource = "direct" | "archive" | "render";
+
+export type ArticleVia = "archive" | "render" | null;
+
 export interface Article {
   id: string;
   url: string;
@@ -16,7 +20,7 @@ export interface Article {
   wordCount: number;
   savedAt: number;
   readAt: number | null;
-  via: "archive" | null;
+  via: ArticleVia;
 }
 
 export interface ExtractedArticle {

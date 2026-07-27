@@ -15,28 +15,69 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
+import { ReaderNav } from "@/components/reader-nav";
 import { useMounted } from "@/hooks/use-mounted";
 import {
   articleDate,
   articleSite,
   readingTime,
   requestExtract,
+  sourceToVia,
   toArticle,
+  viaLabel,
 } from "@/lib/articles";
 import { deleteArticle, listArticles, putArticle } from "@/lib/db";
-import type { Article, ExtractedArticle } from "@/lib/types";
+import type { Article, ExtractedArticle, ExtractSource } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const THIN_WORD_COUNT = 80;
 
 type AddState =
   | { kind: "idle" }
-  | { kind: "loading"; archive: boolean }
-  | { kind: "error"; message: string; url: string; archiveTried: boolean }
-  | { kind: "thin"; data: ExtractedArticle; url: string; archive: boolean };
+  | { kind: "loading"; source: ExtractSource }
+  | { kind: "error"; message: string; url: string; tried: ExtractSource[] }
+  | {
+      kind: "thin";
+      data: ExtractedArticle;
+      url: string;
+      source: ExtractSource;
+      tried: ExtractSource[];
+    };
 
 const actionClass =
   "text-[13px] text-muted-foreground transition-colors hover:text-foreground";
+
+const retryClass =
+  "text-[13px] text-foreground transition-colors hover:opacity-70";
+
+const LOADING_LABELS: Record<ExtractSource, string> = {
+  direct: "Saving…",
+  archive: "Checking archive…",
+  render: "Rendering…",
+};
+
+function RetryButtons({
+  tried,
+  onRetry,
+}: {
+  tried: ExtractSource[];
+  onRetry: (source: ExtractSource) => void;
+}) {
+  return (
+    <>
+      {!tried.includes("render") && (
+        <button className={retryClass} onClick={() => onRetry("render")}>
+          Try the rendered copy
+        </button>
+      )}
+      {!tried.includes("archive") && (
+        <button className={retryClass} onClick={() => onRetry("archive")}>
+          Try the archive.ph copy
+        </button>
+      )}
+    </>
+  );
+}
 
 export default function ReadPage() {
   const mounted = useMounted();
@@ -49,30 +90,35 @@ export default function ReadPage() {
     void listArticles().then(setArticles);
   }, []);
 
-  const save = async (data: ExtractedArticle, archive: boolean) => {
-    const article = toArticle(data, archive ? "archive" : null);
+  const save = async (data: ExtractedArticle, source: ExtractSource) => {
+    const article = toArticle(data, sourceToVia(source));
     await putArticle(article);
     setArticles((prev) => [article, ...(prev ?? [])]);
     setInput("");
     setState({ kind: "idle" });
   };
 
-  const submit = async (url: string, archive: boolean) => {
+  const submit = async (
+    url: string,
+    source: ExtractSource,
+    tried: ExtractSource[] = []
+  ) => {
     if (!url.trim()) return;
-    setState({ kind: "loading", archive });
+    setState({ kind: "loading", source });
+    const nowTried = [...tried, source];
     try {
-      const data = await requestExtract(url, archive);
-      if (data.wordCount < THIN_WORD_COUNT && !archive) {
-        setState({ kind: "thin", data, url, archive });
+      const data = await requestExtract(url, source);
+      if (data.wordCount < THIN_WORD_COUNT && source === "direct") {
+        setState({ kind: "thin", data, url, source, tried: nowTried });
       } else {
-        await save(data, archive);
+        await save(data, source);
       }
     } catch (error) {
       setState({
         kind: "error",
         message: error instanceof Error ? error.message : "Something went wrong",
         url,
-        archiveTried: archive,
+        tried: nowTried,
       });
     }
   };
@@ -86,18 +132,13 @@ export default function ReadPage() {
 
   return (
     <main className="min-h-dvh">
-      <div className="mx-auto max-w-[650px] px-6 pt-14 pb-24">
-        <div className="mb-10 flex items-baseline justify-between">
-          <h1 className="text-sm text-foreground">Read</h1>
-          <Link href="/" className={actionClass}>
-            Write
-          </Link>
-        </div>
+      <div className="mx-auto max-w-[650px] px-6 pt-14 pb-28">
+        <h1 className="mb-10 text-sm text-foreground">Read</h1>
 
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            void submit(input, false);
+            void submit(input, "direct");
           }}
           className="flex items-center gap-3"
         >
@@ -113,26 +154,18 @@ export default function ReadPage() {
             disabled={state.kind === "loading" || !input.trim()}
             className={cn(actionClass, "disabled:opacity-40")}
           >
-            {state.kind === "loading"
-              ? state.archive
-                ? "Checking archive…"
-                : "Saving…"
-              : "Save"}
+            {state.kind === "loading" ? LOADING_LABELS[state.source] : "Save"}
           </button>
         </form>
 
         {state.kind === "error" && (
           <div className="mt-4 text-[13px] text-muted-foreground">
             <p>{state.message}</p>
-            <div className="mt-2 flex gap-4">
-              {!state.archiveTried && (
-                <button
-                  className="text-foreground transition-colors hover:opacity-70"
-                  onClick={() => void submit(state.url, true)}
-                >
-                  Try the archive.ph copy
-                </button>
-              )}
+            <div className="mt-2 flex flex-wrap gap-4">
+              <RetryButtons
+                tried={state.tried}
+                onRetry={(source) => void submit(state.url, source, state.tried)}
+              />
               <button
                 className={actionClass}
                 onClick={() => setState({ kind: "idle" })}
@@ -146,18 +179,17 @@ export default function ReadPage() {
         {state.kind === "thin" && (
           <div className="mt-4 text-[13px] text-muted-foreground">
             <p>
-              Only pulled {state.data.wordCount} words — the page may be gated.
+              Only pulled {state.data.wordCount} words — the page may be gated
+              or rendered in the browser.
             </p>
-            <div className="mt-2 flex gap-4">
-              <button
-                className="text-foreground transition-colors hover:opacity-70"
-                onClick={() => void submit(state.url, true)}
-              >
-                Try the archive.ph copy
-              </button>
+            <div className="mt-2 flex flex-wrap gap-4">
+              <RetryButtons
+                tried={state.tried}
+                onRetry={(source) => void submit(state.url, source, state.tried)}
+              />
               <button
                 className={actionClass}
-                onClick={() => void save(state.data, false)}
+                onClick={() => void save(state.data, state.source)}
               >
                 Save anyway
               </button>
@@ -188,7 +220,7 @@ export default function ReadPage() {
                     articleSite(article),
                     articleDate(article),
                     readingTime(article.wordCount),
-                    article.via === "archive" ? "via archive.ph" : null,
+                    viaLabel(article.via),
                   ]
                     .filter(Boolean)
                     .join(" · ")}
@@ -211,6 +243,8 @@ export default function ReadPage() {
           )}
         </ul>
       </div>
+
+      <ReaderNav />
 
       <AlertDialog
         open={deleting !== null}
