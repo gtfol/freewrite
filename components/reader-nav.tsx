@@ -10,6 +10,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { SyncPopover } from "@/components/sync-popover";
 import { useFullscreen } from "@/hooks/use-fullscreen";
 import { articleMarkdown } from "@/lib/articles";
 import {
@@ -261,6 +262,7 @@ export function ReaderNav({
             <Moon className="size-4" />
           )}
         </button>
+        <SyncPopover />
       </div>
     </nav>
   );

@@ -28,6 +28,7 @@ import {
   viaLabel,
 } from "@/lib/articles";
 import { deleteArticle, listArticles, putArticle } from "@/lib/db";
+import { SYNC_APPLIED_EVENT } from "@/lib/sync";
 import type { Article, ExtractedArticle, ExtractSource } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -92,7 +93,10 @@ export default function ReadPage() {
   );
 
   useEffect(() => {
-    void listArticles().then(setArticles);
+    const refresh = () => void listArticles().then(setArticles);
+    refresh();
+    window.addEventListener(SYNC_APPLIED_EVENT, refresh);
+    return () => window.removeEventListener(SYNC_APPLIED_EVENT, refresh);
   }, []);
 
   const save = async (data: ExtractedArticle, source: ExtractSource) => {

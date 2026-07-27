@@ -3,6 +3,7 @@ export interface Entry {
   createdAt: number;
   updatedAt: number;
   content: string;
+  deletedAt?: number | null;
 }
 
 export type ExtractSource = "direct" | "archive" | "paste";
@@ -25,6 +26,19 @@ export interface Article {
   via: ArticleVia;
   // Set on first trim; content as it was before any blocks were removed.
   contentOriginal?: string;
+  updatedAt: number;
+  deletedAt?: number | null;
+}
+
+export interface SyncCollectionResult<T> {
+  rows: T[];
+  cursor: number;
+  hasMore: boolean;
+}
+
+export interface SyncResponse {
+  entries: SyncCollectionResult<Entry>;
+  articles: SyncCollectionResult<Article>;
 }
 
 export interface ExtractedArticle {

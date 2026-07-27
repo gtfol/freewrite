@@ -1,0 +1,81 @@
+-- freewrite: auth (better-auth) + sync tables
+-- run once in the supabase sql editor.
+
+create table if not exists "user" (
+  "id" text not null primary key,
+  "name" text not null,
+  "email" text not null unique,
+  "emailVerified" boolean not null default false,
+  "image" text,
+  "createdAt" timestamp not null default now(),
+  "updatedAt" timestamp not null default now()
+);
+
+create table if not exists "session" (
+  "id" text not null primary key,
+  "expiresAt" timestamp not null,
+  "token" text not null unique,
+  "createdAt" timestamp not null default now(),
+  "updatedAt" timestamp not null default now(),
+  "ipAddress" text,
+  "userAgent" text,
+  "userId" text not null references "user" ("id") on delete cascade
+);
+
+create table if not exists "account" (
+  "id" text not null primary key,
+  "accountId" text not null,
+  "providerId" text not null,
+  "userId" text not null references "user" ("id") on delete cascade,
+  "accessToken" text,
+  "refreshToken" text,
+  "idToken" text,
+  "accessTokenExpiresAt" timestamp,
+  "refreshTokenExpiresAt" timestamp,
+  "scope" text,
+  "password" text,
+  "createdAt" timestamp not null default now(),
+  "updatedAt" timestamp not null default now()
+);
+
+create table if not exists "verification" (
+  "id" text not null primary key,
+  "identifier" text not null,
+  "value" text not null,
+  "expiresAt" timestamp not null,
+  "createdAt" timestamp default now(),
+  "updatedAt" timestamp default now()
+);
+
+create sequence if not exists sync_seq;
+
+create table if not exists entries (
+  id uuid primary key,
+  user_id text not null references "user" (id) on delete cascade,
+  content text not null,
+  created_at bigint not null,
+  updated_at bigint not null,
+  deleted_at bigint,
+  seq bigint not null default nextval('sync_seq')
+);
+create index if not exists entries_user_seq on entries (user_id, seq);
+
+create table if not exists articles (
+  id uuid primary key,
+  user_id text not null references "user" (id) on delete cascade,
+  url text not null,
+  title text not null,
+  byline text,
+  site_name text,
+  excerpt text,
+  content text not null,
+  content_original text,
+  word_count integer not null,
+  saved_at bigint not null,
+  read_at bigint,
+  via text,
+  updated_at bigint not null,
+  deleted_at bigint,
+  seq bigint not null default nextval('sync_seq')
+);
+create index if not exists articles_user_seq on articles (user_id, seq);
