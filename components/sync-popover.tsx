@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Cloud, CloudOff } from "lucide-react";
 
 import {
@@ -8,7 +8,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Input } from "@/components/ui/input";
 import { authClient } from "@/lib/auth-client";
 import { useSync } from "@/lib/sync";
 import { cn } from "@/lib/utils";
@@ -24,100 +23,30 @@ function lastSyncedLabel(lastSyncAt: number | null): string {
   return `synced ${Math.floor(minutes / 60)}h ago`;
 }
 
-function SignInForm() {
+function SignInOptions() {
   const providers = useSync((s) => s.providers);
-  const refreshSession = useSync((s) => s.refreshSession);
 
-  const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setPending(true);
-    setError(null);
-    const result =
-      mode === "sign-up"
-        ? await authClient.signUp.email({
-            email,
-            password,
-            name: email.split("@")[0] || "writer",
-          })
-        : await authClient.signIn.email({ email, password });
-    setPending(false);
-    if (result.error) {
-      setError(result.error.message ?? "Something went wrong");
-    } else {
-      await refreshSession();
-    }
-  };
-
-  const social = (provider: "google" | "github") => {
+  const signIn = () => {
     void authClient.signIn.social({
-      provider,
+      provider: "google",
       callbackURL: window.location.href,
     });
   };
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-1">
       <p className="px-1 text-xs text-muted-foreground">
         Sync is optional. Without it, everything stays in this browser.
       </p>
-
-      {providers.google && (
-        <button className={optionClass} onClick={() => social("google")}>
+      {providers.google ? (
+        <button className={optionClass} onClick={signIn}>
           Continue with Google
         </button>
+      ) : (
+        <p className="px-1 text-xs text-muted-foreground">
+          No sign-in methods are configured on this deployment.
+        </p>
       )}
-      {providers.github && (
-        <button className={optionClass} onClick={() => social("github")}>
-          Continue with GitHub
-        </button>
-      )}
-
-      <form onSubmit={submit} className="flex flex-col gap-2">
-        <Input
-          type="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="email"
-          className="h-8 text-sm"
-        />
-        <Input
-          type="password"
-          required
-          minLength={8}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="password"
-          className="h-8 text-sm"
-        />
-        {error && <p className="px-1 text-xs text-destructive">{error}</p>}
-        <div className="flex items-center justify-between px-1">
-          <button
-            type="submit"
-            disabled={pending}
-            className="text-sm text-foreground transition-colors hover:opacity-70 disabled:opacity-40"
-          >
-            {pending
-              ? "…"
-              : mode === "sign-up"
-                ? "Create account"
-                : "Sign in"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode(mode === "sign-up" ? "sign-in" : "sign-up")}
-            className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-          >
-            {mode === "sign-up" ? "have an account?" : "new here?"}
-          </button>
-        </div>
-      </form>
     </div>
   );
 }
@@ -173,7 +102,7 @@ export function SyncPopover() {
             </p>
           </div>
         ) : (
-          <SignInForm />
+          <SignInOptions />
         )}
       </PopoverContent>
     </Popover>
