@@ -27,10 +27,7 @@ import type { Article } from "@/lib/types";
 
 interface TrimSession {
   blocks: string[];
-  undo: { blocks: string[]; anchor: number | null }[];
-  // Where the last removal happened; shift-click removes the range between
-  // this gap and the clicked block.
-  anchor: number | null;
+  undo: string[][];
   // The session's starting blocks, joined — stored as contentOriginal on the
   // first trim so a later Restore round-trips to byte-identical content.
   original: string;
@@ -85,32 +82,16 @@ export default function ArticlePage({
     .filter(Boolean)
     .join(" · ");
 
-  const removeBlock = (index: number, range: boolean) => {
-    setTrim((session) => {
-      if (!session) return session;
-      let start = index;
-      let end = index;
-      if (range && session.anchor !== null) {
-        if (index >= session.anchor) {
-          start = Math.max(0, session.anchor);
-        } else {
-          end = Math.min(session.blocks.length - 1, session.anchor - 1);
-        }
-      }
-      const blocks = [
-        ...session.blocks.slice(0, start),
-        ...session.blocks.slice(end + 1),
-      ];
-      return {
-        ...session,
-        blocks,
-        anchor: start,
-        undo: [
-          ...session.undo,
-          { blocks: session.blocks, anchor: session.anchor },
-        ],
-      };
-    });
+  const removeBlock = (index: number) => {
+    setTrim((session) =>
+      session
+        ? {
+            ...session,
+            blocks: session.blocks.filter((_, i) => i !== index),
+            undo: [...session.undo, session.blocks],
+          }
+        : session
+    );
   };
 
   const finishTrim = async () => {
@@ -136,7 +117,7 @@ export default function ArticlePage({
       !!article.contentOriginal && article.contentOriginal !== article.content,
     onStart: () => {
       const blocks = splitBlocks(article.content);
-      setTrim({ blocks, undo: [], anchor: null, original: blocks.join("\n") });
+      setTrim({ blocks, undo: [], original: blocks.join("\n") });
     },
     onDone: () => void finishTrim(),
     onUndo: () =>
@@ -144,7 +125,7 @@ export default function ArticlePage({
         session && session.undo.length > 0
           ? {
               ...session,
-              ...session.undo[session.undo.length - 1],
+              blocks: session.undo[session.undo.length - 1],
               undo: session.undo.slice(0, -1),
             }
           : session
@@ -155,11 +136,7 @@ export default function ArticlePage({
           ? {
               ...session,
               blocks: splitBlocks(article.contentOriginal),
-              anchor: null,
-              undo: [
-                ...session.undo,
-                { blocks: session.blocks, anchor: session.anchor },
-              ],
+              undo: [...session.undo, session.blocks],
             }
           : session
       ),
@@ -171,9 +148,7 @@ export default function ArticlePage({
       <div className="mx-auto max-w-[650px] px-6 pt-14 pb-32">
         {trim && (
           <p className="mb-8 font-sans text-xs text-muted-foreground">
-            Trimming — click a block to remove it; shift-click removes
-            everything between your last click and it. Nothing is saved until
-            Done.
+            Trimming — click a block to remove it. Nothing is saved until Done.
           </p>
         )}
         <article style={{ fontFamily: "var(--font-crimson), Georgia, serif" }}>
@@ -200,7 +175,7 @@ export default function ArticlePage({
                   onClickCapture={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    removeBlock(i, e.shiftKey);
+                    removeBlock(i);
                   }}
                   title="Click to remove"
                   className="-mx-2 cursor-pointer rounded-sm px-2 transition-colors hover:bg-destructive/10"
