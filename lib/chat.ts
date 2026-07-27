@@ -73,6 +73,14 @@ export function articlePromptLink(article: ArticleSource): string {
   return `${READER_PROMPT}\n\n${articleHeader(article)}\n\n(full text is at the link — read it first.)`;
 }
 
+export function articlePromptShared(
+  article: ArticleSource,
+  shareUrl: string,
+  ttlMinutes: number
+): string {
+  return `${READER_PROMPT}\n\n${articleHeader(article)}\n\nread the full text here first: ${shareUrl}\n(that's a temporary snapshot of my saved copy — it expires in about ${ttlMinutes} minutes. the url above it is the original source, for reference only.)`;
+}
+
 export function articleChatUrl(
   provider: ChatProvider,
   article: ArticleSource

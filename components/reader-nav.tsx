@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
@@ -15,6 +15,8 @@ import { articleText } from "@/lib/articles";
 import {
   articleChatUrl,
   articlePromptFull,
+  articlePromptShared,
+  linkoutUrl,
   type ChatProvider,
 } from "@/lib/chat";
 import type { Article } from "@/lib/types";
@@ -31,6 +33,14 @@ function Dot() {
 
 function ArticleChatPopover({ article }: { article: Article }) {
   const [copied, setCopied] = useState<ChatProvider | null>(null);
+  const [shareReady, setShareReady] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch("/api/share")
+      .then((res) => res.json())
+      .then((body) => setShareReady(!!body?.enabled))
+      .catch(() => setShareReady(false));
+  }, []);
 
   const source = {
     title: article.title,
@@ -40,8 +50,39 @@ function ArticleChatPopover({ article }: { article: Article }) {
   };
 
   const open = (provider: ChatProvider) => {
-    const { url } = articleChatUrl(provider, source);
-    window.open(url, "_blank", "noopener,noreferrer");
+    const direct = articleChatUrl(provider, source);
+    if (direct.carriesFullText || !shareReady) {
+      window.open(direct.url, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    // The share upload is async; open the tab now so popup blockers see a
+    // user gesture, then point it once the link exists (or at the fallback).
+    const win = window.open("", "_blank");
+    if (win) win.opener = null;
+    const navigate = (url: string) => {
+      if (win) win.location.href = url;
+      else window.open(url, "_blank", "noopener,noreferrer");
+    };
+
+    void (async () => {
+      try {
+        const res = await fetch("/api/share", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(source),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body?.error);
+        const shareUrl = `${window.location.origin}/s/${body.id}`;
+        const minutes = Math.max(1, Math.round(body.ttlSeconds / 60));
+        navigate(
+          linkoutUrl(provider, articlePromptShared(source, shareUrl, minutes))
+        );
+      } catch {
+        navigate(direct.url);
+      }
+    })();
   };
 
   const copy = async (provider: ChatProvider) => {
@@ -63,7 +104,13 @@ function ArticleChatPopover({ article }: { article: Article }) {
           <button className={optionClass} onClick={() => open("claude")}>
             Claude
           </button>
-          {linkOnly && (
+          {linkOnly && shareReady === true && (
+            <p className="px-3 py-2 text-xs text-muted-foreground">
+              The article is too long to send directly, so those open with a
+              temporary share link that expires on its own.
+            </p>
+          )}
+          {linkOnly && shareReady !== true && (
             <>
               <p className="px-3 py-2 text-xs text-muted-foreground">
                 The article is too long to send as a link, so those open with
