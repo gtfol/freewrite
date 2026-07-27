@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 
 import {
   AlertDialog,
@@ -87,6 +87,9 @@ export default function ReadPage() {
   const [input, setInput] = useState("");
   const [state, setState] = useState<AddState>({ kind: "idle" });
   const [deleting, setDeleting] = useState<Article | null>(null);
+  const [renaming, setRenaming] = useState<{ id: string; draft: string } | null>(
+    null
+  );
 
   useEffect(() => {
     void listArticles().then(setArticles);
@@ -129,6 +132,18 @@ export default function ReadPage() {
   const remove = async (article: Article) => {
     await deleteArticle(article.id);
     setArticles((prev) => (prev ?? []).filter((a) => a.id !== article.id));
+  };
+
+  const finishRename = async (article: Article) => {
+    if (!renaming || renaming.id !== article.id) return;
+    const title = renaming.draft.trim();
+    setRenaming(null);
+    if (!title || title === article.title) return;
+    const updated = { ...article, title };
+    await putArticle(updated);
+    setArticles((prev) =>
+      (prev ?? []).map((a) => (a.id === article.id ? updated : a))
+    );
   };
 
   if (!mounted) return <main className="min-h-dvh" />;
@@ -247,38 +262,78 @@ export default function ReadPage() {
         )}
 
         <ul className="mt-12 flex flex-col">
-          {articles?.map((article) => (
-            <li key={article.id} className="group relative border-b border-border/60">
-              <Link href={`/read/${article.id}`} className="block py-4 pr-8">
-                <span
-                  className={cn(
-                    "block text-[15px] leading-snug",
-                    article.readAt ? "text-muted-foreground" : "text-foreground"
-                  )}
-                >
-                  {article.title}
-                </span>
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  {[
-                    articleSite(article),
-                    articleDate(article),
-                    readingTime(article.wordCount),
-                    viaLabel(article.via),
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </span>
-              </Link>
-              <button
-                type="button"
-                onClick={() => setDeleting(article)}
-                title="Delete"
-                className="absolute top-1/2 right-0 hidden -translate-y-1/2 text-muted-foreground transition-colors hover:text-destructive group-hover:block"
+          {articles?.map((article) => {
+            const metaLine = (
+              <span className="mt-1 block text-xs text-muted-foreground">
+                {[
+                  articleSite(article),
+                  articleDate(article),
+                  readingTime(article.wordCount),
+                  viaLabel(article.via),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            );
+
+            return (
+              <li
+                key={article.id}
+                className="group relative border-b border-border/60"
               >
-                <Trash2 className="size-3.5" />
-              </button>
-            </li>
-          ))}
+                {renaming?.id === article.id ? (
+                  <div className="block py-4 pr-14">
+                    <input
+                      autoFocus
+                      value={renaming.draft}
+                      onChange={(e) =>
+                        setRenaming({ id: article.id, draft: e.target.value })
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void finishRename(article);
+                        if (e.key === "Escape") setRenaming(null);
+                      }}
+                      onBlur={() => void finishRename(article)}
+                      className="w-full border-b border-border bg-transparent text-[15px] leading-snug text-foreground outline-none focus:border-foreground/40"
+                    />
+                    {metaLine}
+                  </div>
+                ) : (
+                  <Link href={`/read/${article.id}`} className="block py-4 pr-14">
+                    <span
+                      className={cn(
+                        "block text-[15px] leading-snug",
+                        article.readAt
+                          ? "text-muted-foreground"
+                          : "text-foreground"
+                      )}
+                    >
+                      {article.title}
+                    </span>
+                    {metaLine}
+                  </Link>
+                )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setRenaming({ id: article.id, draft: article.title })
+                  }
+                  title="Rename"
+                  className="absolute top-1/2 right-6 hidden -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground group-hover:block"
+                >
+                  <Pencil className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeleting(article)}
+                  title="Delete"
+                  className="absolute top-1/2 right-0 hidden -translate-y-1/2 text-muted-foreground transition-colors hover:text-destructive group-hover:block"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </li>
+            );
+          })}
           {articles?.length === 0 && (
             <li className="py-4 text-[13px] text-muted-foreground">
               Nothing saved yet. Paste a link above.

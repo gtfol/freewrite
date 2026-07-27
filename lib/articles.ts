@@ -48,9 +48,51 @@ export function toArticle(data: ExtractedArticle, via: ArticleVia): Article {
   };
 }
 
-export function articleText(article: Article): string {
-  const doc = new DOMParser().parseFromString(article.content, "text/html");
+function htmlText(html: string): string {
+  const doc = new DOMParser().parseFromString(html, "text/html");
   return (doc.body.textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
+export function articleText(article: Article): string {
+  return htmlText(article.content);
+}
+
+export function htmlWordCount(html: string): number {
+  const text = htmlText(html);
+  return text ? text.split(" ").length : 0;
+}
+
+// Splits article HTML into trimmable blocks. Bare <div>s are unwrapped —
+// after sanitization they are pure containers (select-all pastes arrive as
+// one page-sized div), and trimming needs the paragraphs inside them.
+export function splitBlocks(html: string): string[] {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const blocks: string[] = [];
+
+  const walk = (nodes: Iterable<ChildNode>) => {
+    for (const node of nodes) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const el = node as Element;
+        if (el.tagName === "DIV") {
+          walk(Array.from(el.childNodes));
+        } else if (
+          el.textContent?.trim() ||
+          el.tagName === "HR" ||
+          el.tagName === "IMG" ||
+          el.querySelector("img")
+        ) {
+          blocks.push(el.outerHTML);
+        }
+      } else if (node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) {
+        const p = doc.createElement("p");
+        p.textContent = node.textContent.trim();
+        blocks.push(p.outerHTML);
+      }
+    }
+  };
+
+  walk(Array.from(doc.body.childNodes));
+  return blocks;
 }
 
 export function plainTextToHtml(text: string): string {

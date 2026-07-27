@@ -15,9 +15,23 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { ReaderNav } from "@/components/reader-nav";
-import { articleSite, readingTime, viaLabel } from "@/lib/articles";
+import {
+  articleSite,
+  htmlWordCount,
+  readingTime,
+  splitBlocks,
+  viaLabel,
+} from "@/lib/articles";
 import { deleteArticle, getArticle, putArticle } from "@/lib/db";
 import type { Article } from "@/lib/types";
+
+interface TrimSession {
+  blocks: string[];
+  undo: string[][];
+  // The session's starting blocks, joined — stored as contentOriginal on the
+  // first trim so a later Restore round-trips to byte-identical content.
+  original: string;
+}
 
 export default function ArticlePage({
   params,
@@ -28,6 +42,7 @@ export default function ArticlePage({
   const router = useRouter();
   const [article, setArticle] = useState<Article | null | undefined>(undefined);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [trim, setTrim] = useState<TrimSession | null>(null);
 
   useEffect(() => {
     void getArticle(id).then((found) => {
@@ -67,9 +82,78 @@ export default function ArticlePage({
     .filter(Boolean)
     .join(" · ");
 
+  const removeBlock = (index: number, mode: "one" | "above" | "below") => {
+    setTrim((session) => {
+      if (!session) return session;
+      const blocks =
+        mode === "above"
+          ? session.blocks.slice(index + 1)
+          : mode === "below"
+            ? session.blocks.slice(0, index)
+            : session.blocks.filter((_, i) => i !== index);
+      return { ...session, blocks, undo: [...session.undo, session.blocks] };
+    });
+  };
+
+  const finishTrim = async () => {
+    if (!trim) return;
+    const content = trim.blocks.join("\n");
+    if (content !== article.content) {
+      const updated: Article = {
+        ...article,
+        content,
+        wordCount: htmlWordCount(content),
+        contentOriginal: article.contentOriginal ?? trim.original,
+      };
+      await putArticle(updated);
+      setArticle(updated);
+    }
+    setTrim(null);
+  };
+
+  const trimControls = {
+    active: trim !== null,
+    canUndo: (trim?.undo.length ?? 0) > 0,
+    canRestore:
+      !!article.contentOriginal && article.contentOriginal !== article.content,
+    onStart: () => {
+      const blocks = splitBlocks(article.content);
+      setTrim({ blocks, undo: [], original: blocks.join("\n") });
+    },
+    onDone: () => void finishTrim(),
+    onUndo: () =>
+      setTrim((session) =>
+        session && session.undo.length > 0
+          ? {
+              ...session,
+              blocks: session.undo[session.undo.length - 1],
+              undo: session.undo.slice(0, -1),
+            }
+          : session
+      ),
+    onRestore: () =>
+      setTrim((session) =>
+        session && article.contentOriginal
+          ? {
+              ...session,
+              blocks: splitBlocks(article.contentOriginal),
+              undo: [...session.undo, session.blocks],
+            }
+          : session
+      ),
+    onCancel: () => setTrim(null),
+  };
+
   return (
     <main className="min-h-dvh">
       <div className="mx-auto max-w-[650px] px-6 pt-14 pb-32">
+        {trim && (
+          <p className="mb-8 font-sans text-xs text-muted-foreground">
+            Trimming — click a block to remove it. Shift-click removes it and
+            everything above; alt-click it and everything below. Nothing is
+            saved until Done.
+          </p>
+        )}
         <article style={{ fontFamily: "var(--font-crimson), Georgia, serif" }}>
           <h1 className="text-[1.75rem] leading-tight font-semibold">
             {article.title}
@@ -86,14 +170,44 @@ export default function ArticlePage({
               original
             </a>
           </p>
-          <div
-            className="reader mt-10"
-            dangerouslySetInnerHTML={{ __html: article.content }}
-          />
+          {trim ? (
+            <div className="reader mt-10">
+              {trim.blocks.map((block, i) => (
+                <div
+                  key={`${i}-${block.length}`}
+                  onClickCapture={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    removeBlock(
+                      i,
+                      e.shiftKey ? "above" : e.altKey ? "below" : "one"
+                    );
+                  }}
+                  title="Click to remove"
+                  className="-mx-2 cursor-pointer rounded-sm px-2 transition-colors hover:bg-destructive/10"
+                  dangerouslySetInnerHTML={{ __html: block }}
+                />
+              ))}
+              {trim.blocks.length === 0 && (
+                <p className="font-sans text-sm text-muted-foreground">
+                  Nothing left — Undo, or Cancel to keep the article as it was.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div
+              className="reader mt-10"
+              dangerouslySetInnerHTML={{ __html: article.content }}
+            />
+          )}
         </article>
       </div>
 
-      <ReaderNav article={article} onDelete={() => setConfirmingDelete(true)} />
+      <ReaderNav
+        article={article}
+        onDelete={() => setConfirmingDelete(true)}
+        trim={trimControls}
+      />
 
       <AlertDialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
         <AlertDialogContent>

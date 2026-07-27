@@ -80,15 +80,65 @@ function ArticleChatPopover({ article }: { article: Article }) {
   );
 }
 
+export interface TrimControls {
+  active: boolean;
+  canUndo: boolean;
+  canRestore: boolean;
+  onStart: () => void;
+  onDone: () => void;
+  onUndo: () => void;
+  onRestore: () => void;
+  onCancel: () => void;
+}
+
 export function ReaderNav({
   article,
   onDelete,
+  trim,
 }: {
   article?: Article;
   onDelete?: () => void;
+  trim?: TrimControls;
 }) {
   const { theme, setTheme } = useTheme();
   const fullscreen = useFullscreen();
+
+  if (trim?.active) {
+    return (
+      <nav className="fixed inset-x-0 bottom-0 z-40 bg-background">
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-6 py-4 text-[13px]">
+          <button
+            type="button"
+            onClick={trim.onDone}
+            className="text-foreground transition-colors hover:opacity-70"
+          >
+            Done
+          </button>
+          <Dot />
+          <button
+            type="button"
+            onClick={trim.onUndo}
+            disabled={!trim.canUndo}
+            className={`${itemClass} disabled:opacity-40`}
+          >
+            Undo
+          </button>
+          {trim.canRestore && (
+            <>
+              <Dot />
+              <button type="button" onClick={trim.onRestore} className={itemClass}>
+                Restore original
+              </button>
+            </>
+          )}
+          <Dot />
+          <button type="button" onClick={trim.onCancel} className={itemClass}>
+            Cancel
+          </button>
+        </div>
+      </nav>
+    );
+  }
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 bg-background">
@@ -109,6 +159,14 @@ export function ReaderNav({
             >
               Original
             </a>
+            {trim && (
+              <>
+                <Dot />
+                <button type="button" onClick={trim.onStart} className={itemClass}>
+                  Trim
+                </button>
+              </>
+            )}
             {onDelete && (
               <>
                 <Dot />

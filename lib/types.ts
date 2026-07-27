@@ -23,6 +23,8 @@ export interface Article {
   savedAt: number;
   readAt: number | null;
   via: ArticleVia;
+  // Set on first trim; content as it was before any blocks were removed.
+  contentOriginal?: string;
 }
 
 export interface ExtractedArticle {
