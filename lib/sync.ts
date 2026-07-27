@@ -59,7 +59,7 @@ interface SyncUser {
 
 interface SyncState {
   status: SyncStatus;
-  providers: { google: boolean; github: boolean };
+  providers: { google: boolean };
   user: SyncUser | null;
   lastSyncAt: number | null;
   error: string | null;
@@ -76,7 +76,7 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useSync = create<SyncState>()((set, get) => ({
   status: "loading",
-  providers: { google: false, github: false },
+  providers: { google: false },
   user: null,
   lastSyncAt: null,
   error: null,

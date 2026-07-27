@@ -13,9 +13,6 @@ export function enabledProviders() {
     google: Boolean(
       process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
     ),
-    github: Boolean(
-      process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET
-    ),
   };
 }
 
@@ -27,18 +24,11 @@ export function getAuth() {
       database: getPool(),
       secret: process.env.BETTER_AUTH_SECRET,
       baseURL: process.env.BETTER_AUTH_URL,
-      emailAndPassword: { enabled: true },
       socialProviders: {
         ...(providers.google && {
           google: {
             clientId: process.env.GOOGLE_CLIENT_ID!,
             clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-          },
-        }),
-        ...(providers.github && {
-          github: {
-            clientId: process.env.GITHUB_CLIENT_ID!,
-            clientSecret: process.env.GITHUB_CLIENT_SECRET!,
           },
         }),
       },

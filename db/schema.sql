@@ -1,5 +1,7 @@
 -- freewrite: auth (better-auth) + sync tables
--- run once in the supabase sql editor.
+-- fresh install: run this once in the supabase sql editor.
+-- existing install: don't rerun this — apply db/migrations/*.sql in order instead.
+-- every schema change lands in both places in the same pr.
 
 create table if not exists "user" (
   "id" text not null primary key,
