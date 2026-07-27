@@ -26,6 +26,12 @@
   --highlight: oklch(0.94 0.07 152);
   --highlight-hover: oklch(0.89 0.1 152);
   --highlight-accent: oklch(0.55 0.14 152);
+  --syntax-key: oklch(0.48 0.1 240);
+  --syntax-string: oklch(0.5 0.11 150);
+  --syntax-number: oklch(0.5 0.14 265);
+  --syntax-keyword: oklch(0.5 0.15 310);
+  --syntax-title: oklch(0.52 0.12 45);
+  --syntax-comment: oklch(0.605 0 0);
 }
 
 .dark {
@@ -50,6 +56,12 @@
   --highlight: oklch(0.45 0.09 152 / 45%);
   --highlight-hover: oklch(0.5 0.1 152 / 60%);
   --highlight-accent: oklch(0.72 0.12 152);
+  --syntax-key: oklch(0.75 0.09 240);
+  --syntax-string: oklch(0.76 0.11 150);
+  --syntax-number: oklch(0.76 0.11 265);
+  --syntax-keyword: oklch(0.76 0.12 310);
+  --syntax-title: oklch(0.78 0.11 60);
+  --syntax-comment: oklch(0.556 0 0);
 }
 
 @theme inline {
@@ -216,5 +228,79 @@
   & [data-hl-chip] svg {
     width: 0.75em;
     height: 0.75em;
+  }
+}
+
+/* Syntax colors for highlighted code in the markdown preview (highlight.js
+   token classes), mapped onto the theme-aware --syntax-* palette. */
+.hljs-comment,
+.hljs-quote {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-built_in,
+.hljs-doctag {
+  color: var(--syntax-keyword);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-meta .hljs-string {
+  color: var(--syntax-string);
+}
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link,
+.hljs-meta {
+  color: var(--syntax-number);
+}
+.hljs-title,
+.hljs-section,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: var(--syntax-title);
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-type,
+.hljs-params,
+.hljs-property {
+  color: var(--syntax-key);
+}
+.hljs-deletion {
+  color: var(--color-destructive);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
+}
+
+/* JSON tree view in the markdown preview. */
+.json-tree {
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+
+  & .json-key {
+    color: var(--syntax-key);
+  }
+  & .json-string {
+    color: var(--syntax-string);
+  }
+  & .json-number {
+    color: var(--syntax-number);
+  }
+  & .json-boolean {
+    color: var(--syntax-keyword);
+  }
+  & .json-null {
+    color: var(--syntax-comment);
   }
 }
