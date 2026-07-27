@@ -1,11 +1,12 @@
 import type { Article, Entry } from "@/lib/types";
 
 const DB_NAME = "freewrite";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const ENTRIES = "entries";
 const ARTICLES = "articles";
 const OUTBOX = "outbox";
+const SYNCMETA = "syncmeta";
 
 const TOMBSTONE_TTL = 30 * 24 * 60 * 60 * 1000;
 
@@ -16,6 +17,13 @@ export interface OutboxItem {
   collection: Collection;
   id: string;
   addedAt: number;
+}
+
+// Last server-confirmed state per record: revision + content hash.
+export interface SyncMeta {
+  key: string;
+  rev: number;
+  hash: string;
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -52,6 +60,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(OUTBOX)) {
         db.createObjectStore(OUTBOX, { keyPath: "key" });
+      }
+      if (!db.objectStoreNames.contains(SYNCMETA)) {
+        db.createObjectStore(SYNCMETA, { keyPath: "key" });
       }
     };
 
@@ -141,8 +152,10 @@ export async function getEntry(id: string): Promise<Entry | undefined> {
   return normalized.deletedAt ? undefined : normalized;
 }
 
+// Stamping here (not at call sites) guarantees every local mutation registers
+// as a change — a call site that forgets updatedAt can't silently break sync.
 export async function putEntry(entry: Entry): Promise<void> {
-  await put(ENTRIES, entry);
+  await put(ENTRIES, { ...entry, updatedAt: Date.now() });
   await markDirty("entries", entry.id);
 }
 
@@ -170,7 +183,7 @@ export async function getArticle(id: string): Promise<Article | undefined> {
 }
 
 export async function putArticle(article: Article): Promise<void> {
-  await put(ARTICLES, article);
+  await put(ARTICLES, { ...article, updatedAt: Date.now() });
   await markDirty("articles", article.id);
 }
 
@@ -197,11 +210,25 @@ export async function getArticleRaw(id: string): Promise<Article | undefined> {
   return article ? normalizeArticle(article) : undefined;
 }
 
+export async function listEntriesRaw(): Promise<Entry[]> {
+  return (await getAll<Entry>(ENTRIES)).map(normalizeEntry);
+}
+
+export async function listArticlesRaw(): Promise<Article[]> {
+  return (await getAll<Article>(ARTICLES)).map(normalizeArticle);
+}
+
 export const applyRemoteEntry = (entry: Entry) => put(ENTRIES, entry);
 export const applyRemoteArticle = (article: Article) => put(ARTICLES, article);
 
 export const listOutbox = () => getAll<OutboxItem>(OUTBOX);
 export const clearOutboxItem = (key: string) => hardDelete(OUTBOX, key);
+export const enqueueOutbox = (collection: Collection, id: string) =>
+  markDirty(collection, id);
+
+export const getSyncMeta = (key: string) => get<SyncMeta>(SYNCMETA, key);
+export const putSyncMeta = (meta: SyncMeta) => put(SYNCMETA, meta);
+export const listSyncMeta = () => getAll<SyncMeta>(SYNCMETA);
 
 export async function purgeTombstones(): Promise<void> {
   const cutoff = Date.now() - TOMBSTONE_TTL;

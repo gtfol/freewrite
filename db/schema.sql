@@ -58,7 +58,8 @@ create table if not exists entries (
   created_at bigint not null,
   updated_at bigint not null,
   deleted_at bigint,
-  seq bigint not null default nextval('sync_seq')
+  seq bigint not null default nextval('sync_seq'),
+  hash text not null default ''
 );
 create index if not exists entries_user_seq on entries (user_id, seq);
 
@@ -78,6 +79,7 @@ create table if not exists articles (
   via text,
   updated_at bigint not null,
   deleted_at bigint,
-  seq bigint not null default nextval('sync_seq')
+  seq bigint not null default nextval('sync_seq'),
+  hash text not null default ''
 );
 create index if not exists articles_user_seq on articles (user_id, seq);

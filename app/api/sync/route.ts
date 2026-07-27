@@ -3,7 +3,14 @@ import type { PoolClient } from "pg";
 
 import { getAuth } from "@/lib/server/auth";
 import { getPool } from "@/lib/server/db";
-import type { Article, Entry, SyncCollectionResult } from "@/lib/types";
+import type {
+  Article,
+  Entry,
+  PushOutcome,
+  SyncChange,
+  SyncCollectionResult,
+  SyncRow,
+} from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -23,6 +30,8 @@ const asText = (v: unknown, max: number): string | null =>
   typeof v === "string" && v.length <= max ? v : null;
 const asOptText = (v: unknown, max: number): string | null =>
   typeof v === "string" && v.length <= max ? v : null;
+const isHash = (v: unknown): v is string =>
+  typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
 
 function asEntry(v: unknown): Entry | null {
   if (typeof v !== "object" || v === null) return null;
@@ -78,139 +87,88 @@ function asArticle(v: unknown): Article | null {
     wordCount: Math.max(0, Math.floor(a.wordCount)),
     savedAt: a.savedAt,
     readAt: (a.readAt as number | null | undefined) ?? null,
-    via: a.via === "archive" || a.via === "render" ? a.via : null,
+    via:
+      a.via === "archive" || a.via === "render" || a.via === "paste"
+        ? a.via
+        : null,
     updatedAt: a.updatedAt,
     deletedAt: (a.deletedAt as number | null | undefined) ?? null,
   };
 }
 
-function parseCollection<T>(
+function parseChanges<T>(
   v: unknown,
   parse: (item: unknown) => T | null
-): { since: number; changes: T[] } {
+): { since: number; changes: SyncChange<T>[] } {
   if (typeof v !== "object" || v === null) return { since: 0, changes: [] };
   const c = v as Record<string, unknown>;
   const since = isStamp(c.since) ? c.since : 0;
-  const changes = Array.isArray(c.changes)
-    ? c.changes.slice(0, MAX_CHANGES).flatMap((item) => {
-        const parsed = parse(item);
-        return parsed ? [parsed] : [];
-      })
-    : [];
+  const changes: SyncChange<T>[] = [];
+  if (Array.isArray(c.changes)) {
+    for (const item of c.changes.slice(0, MAX_CHANGES)) {
+      if (typeof item !== "object" || item === null) continue;
+      const change = item as Record<string, unknown>;
+      const record = parse(change.record);
+      if (!record || !isHash(change.hash)) continue;
+      changes.push({
+        record,
+        baseRev: isStamp(change.baseRev) ? change.baseRev : 0,
+        hash: change.hash,
+      });
+    }
+  }
   return { since, changes };
-}
-
-async function pushEntries(client: PoolClient, uid: string, changes: Entry[]) {
-  for (const e of changes) {
-    await client.query(
-      `insert into entries (id, user_id, content, created_at, updated_at, deleted_at)
-       values ($1, $2, $3, $4, $5, $6)
-       on conflict (id) do update set
-         content = excluded.content,
-         updated_at = excluded.updated_at,
-         deleted_at = excluded.deleted_at,
-         seq = nextval('sync_seq')
-       where entries.user_id = excluded.user_id
-         and excluded.updated_at > entries.updated_at`,
-      [e.id, uid, e.content, e.createdAt, e.updatedAt, e.deletedAt]
-    );
-  }
-}
-
-async function pushArticles(
-  client: PoolClient,
-  uid: string,
-  changes: Article[]
-) {
-  for (const a of changes) {
-    await client.query(
-      `insert into articles (id, user_id, url, title, byline, site_name, excerpt,
-         content, content_original, word_count, saved_at, read_at, via,
-         updated_at, deleted_at)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-       on conflict (id) do update set
-         url = excluded.url,
-         title = excluded.title,
-         byline = excluded.byline,
-         site_name = excluded.site_name,
-         excerpt = excluded.excerpt,
-         content = excluded.content,
-         content_original = excluded.content_original,
-         word_count = excluded.word_count,
-         read_at = excluded.read_at,
-         via = excluded.via,
-         updated_at = excluded.updated_at,
-         deleted_at = excluded.deleted_at,
-         seq = nextval('sync_seq')
-       where articles.user_id = excluded.user_id
-         and excluded.updated_at > articles.updated_at`,
-      [
-        a.id,
-        uid,
-        a.url,
-        a.title,
-        a.byline,
-        a.siteName,
-        a.excerpt,
-        a.content,
-        a.contentOriginal ?? null,
-        a.wordCount,
-        a.savedAt,
-        a.readAt,
-        a.via,
-        a.updatedAt,
-        a.deletedAt,
-      ]
-    );
-  }
 }
 
 const num = (v: unknown): number => Number(v);
 const numOrNull = (v: unknown): number | null => (v === null ? null : Number(v));
 
-async function pullEntries(
-  client: PoolClient,
-  uid: string,
-  since: number
-): Promise<SyncCollectionResult<Entry>> {
-  const { rows } = await client.query(
-    `select id, content, created_at, updated_at, deleted_at, seq
-     from entries where user_id = $1 and seq > $2
-     order by seq asc limit ${PULL_LIMIT + 1}`,
-    [uid, since]
-  );
-  const hasMore = rows.length > PULL_LIMIT;
-  const page = hasMore ? rows.slice(0, PULL_LIMIT) : rows;
+interface EntryRowShape {
+  id: string;
+  content: string;
+  created_at: unknown;
+  updated_at: unknown;
+  deleted_at: unknown;
+  seq: unknown;
+  hash: string;
+}
+
+function entryRow(r: EntryRowShape): SyncRow<Entry> {
   return {
-    rows: page.map((r) => ({
+    record: {
       id: r.id,
       content: r.content,
       createdAt: num(r.created_at),
       updatedAt: num(r.updated_at),
       deletedAt: numOrNull(r.deleted_at),
-    })),
-    cursor: page.length ? num(page[page.length - 1].seq) : since,
-    hasMore,
+    },
+    rev: num(r.seq),
+    hash: r.hash,
   };
 }
 
-async function pullArticles(
-  client: PoolClient,
-  uid: string,
-  since: number
-): Promise<SyncCollectionResult<Article>> {
-  const { rows } = await client.query(
-    `select id, url, title, byline, site_name, excerpt, content,
-       content_original, word_count, saved_at, read_at, via, updated_at,
-       deleted_at, seq
-     from articles where user_id = $1 and seq > $2
-     order by seq asc limit ${PULL_LIMIT + 1}`,
-    [uid, since]
-  );
-  const hasMore = rows.length > PULL_LIMIT;
-  const page = hasMore ? rows.slice(0, PULL_LIMIT) : rows;
+interface ArticleRowShape {
+  id: string;
+  url: string;
+  title: string;
+  byline: string | null;
+  site_name: string | null;
+  excerpt: string | null;
+  content: string;
+  content_original: string | null;
+  word_count: number;
+  saved_at: unknown;
+  read_at: unknown;
+  via: Article["via"];
+  updated_at: unknown;
+  deleted_at: unknown;
+  seq: unknown;
+  hash: string;
+}
+
+function articleRow(r: ArticleRowShape): SyncRow<Article> {
   return {
-    rows: page.map((r) => ({
+    record: {
       id: r.id,
       url: r.url,
       title: r.title,
@@ -225,7 +183,157 @@ async function pullArticles(
       via: r.via,
       updatedAt: num(r.updated_at),
       deletedAt: numOrNull(r.deleted_at),
-    })),
+    },
+    rev: num(r.seq),
+    hash: r.hash,
+  };
+}
+
+const ENTRY_COLS = "id, content, created_at, updated_at, deleted_at, seq, hash";
+const ARTICLE_COLS =
+  "id, url, title, byline, site_name, excerpt, content, content_original, word_count, saved_at, read_at, via, updated_at, deleted_at, seq, hash";
+
+// Compare-and-swap write. The update predicate carries the expected seq, so a
+// concurrent write from another device turns this into a clean conflict
+// instead of a silent overwrite. Legacy rows (hash = '') accept any writer
+// once — they predate hashing, so there is no base to compare against.
+async function pushEntry(
+  client: PoolClient,
+  uid: string,
+  change: SyncChange<Entry>
+): Promise<PushOutcome<Entry>> {
+  const e = change.record;
+
+  const inserted = await client.query(
+    `insert into entries (id, user_id, content, created_at, updated_at, deleted_at, hash)
+     values ($1, $2, $3, $4, $5, $6, $7)
+     on conflict (id) do nothing
+     returning seq`,
+    [e.id, uid, e.content, e.createdAt, e.updatedAt, e.deletedAt, change.hash]
+  );
+  if (inserted.rowCount) {
+    return { id: e.id, status: "ok", rev: num(inserted.rows[0].seq), hash: change.hash };
+  }
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { rows } = await client.query(
+      `select ${ENTRY_COLS} from entries where id = $1 and user_id = $2`,
+      [e.id, uid]
+    );
+    if (!rows.length) {
+      // Same id under another account — cryptographically negligible; report
+      // the client's own state so it stops retrying, write nothing.
+      return { id: e.id, status: "ok", rev: change.baseRev, hash: change.hash };
+    }
+    const current = rows[0] as EntryRowShape;
+    if (current.hash === change.hash) {
+      return { id: e.id, status: "ok", rev: num(current.seq), hash: current.hash };
+    }
+    if (num(current.seq) === change.baseRev || current.hash === "") {
+      const updated = await client.query(
+        `update entries set content = $3, updated_at = $4, deleted_at = $5,
+           hash = $6, seq = nextval('sync_seq')
+         where id = $1 and user_id = $2 and seq = $7
+         returning seq`,
+        [e.id, uid, e.content, e.updatedAt, e.deletedAt, change.hash, current.seq]
+      );
+      if (updated.rowCount) {
+        return { id: e.id, status: "ok", rev: num(updated.rows[0].seq), hash: change.hash };
+      }
+      continue; // raced with another device — re-read and re-decide once
+    }
+    return { id: e.id, status: "conflict", server: entryRow(current) };
+  }
+
+  const { rows } = await client.query(
+    `select ${ENTRY_COLS} from entries where id = $1 and user_id = $2`,
+    [e.id, uid]
+  );
+  return { id: e.id, status: "conflict", server: entryRow(rows[0] as EntryRowShape) };
+}
+
+async function pushArticle(
+  client: PoolClient,
+  uid: string,
+  change: SyncChange<Article>
+): Promise<PushOutcome<Article>> {
+  const a = change.record;
+
+  const inserted = await client.query(
+    `insert into articles (id, user_id, url, title, byline, site_name, excerpt,
+       content, content_original, word_count, saved_at, read_at, via,
+       updated_at, deleted_at, hash)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+     on conflict (id) do nothing
+     returning seq`,
+    [
+      a.id, uid, a.url, a.title, a.byline, a.siteName, a.excerpt,
+      a.content, a.contentOriginal ?? null, a.wordCount, a.savedAt, a.readAt,
+      a.via, a.updatedAt, a.deletedAt, change.hash,
+    ]
+  );
+  if (inserted.rowCount) {
+    return { id: a.id, status: "ok", rev: num(inserted.rows[0].seq), hash: change.hash };
+  }
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { rows } = await client.query(
+      `select ${ARTICLE_COLS} from articles where id = $1 and user_id = $2`,
+      [a.id, uid]
+    );
+    if (!rows.length) {
+      return { id: a.id, status: "ok", rev: change.baseRev, hash: change.hash };
+    }
+    const current = rows[0] as ArticleRowShape;
+    if (current.hash === change.hash) {
+      return { id: a.id, status: "ok", rev: num(current.seq), hash: current.hash };
+    }
+    if (num(current.seq) === change.baseRev || current.hash === "") {
+      const updated = await client.query(
+        `update articles set url = $3, title = $4, byline = $5, site_name = $6,
+           excerpt = $7, content = $8, content_original = $9, word_count = $10,
+           read_at = $11, via = $12, updated_at = $13, deleted_at = $14,
+           hash = $15, seq = nextval('sync_seq')
+         where id = $1 and user_id = $2 and seq = $16
+         returning seq`,
+        [
+          a.id, uid, a.url, a.title, a.byline, a.siteName, a.excerpt,
+          a.content, a.contentOriginal ?? null, a.wordCount, a.readAt, a.via,
+          a.updatedAt, a.deletedAt, change.hash, current.seq,
+        ]
+      );
+      if (updated.rowCount) {
+        return { id: a.id, status: "ok", rev: num(updated.rows[0].seq), hash: change.hash };
+      }
+      continue;
+    }
+    return { id: a.id, status: "conflict", server: articleRow(current) };
+  }
+
+  const { rows } = await client.query(
+    `select ${ARTICLE_COLS} from articles where id = $1 and user_id = $2`,
+    [a.id, uid]
+  );
+  return { id: a.id, status: "conflict", server: articleRow(rows[0] as ArticleRowShape) };
+}
+
+async function pull<T>(
+  client: PoolClient,
+  table: "entries" | "articles",
+  cols: string,
+  toRow: (r: never) => SyncRow<T>,
+  uid: string,
+  since: number
+): Promise<{ rows: SyncRow<T>[]; cursor: number; hasMore: boolean }> {
+  const { rows } = await client.query(
+    `select ${cols} from ${table} where user_id = $1 and seq > $2
+     order by seq asc limit ${PULL_LIMIT + 1}`,
+    [uid, since]
+  );
+  const hasMore = rows.length > PULL_LIMIT;
+  const page = hasMore ? rows.slice(0, PULL_LIMIT) : rows;
+  return {
+    rows: page.map((r) => toRow(r as never)),
     cursor: page.length ? num(page[page.length - 1].seq) : since,
     hasMore,
   };
@@ -253,22 +361,40 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
 
-  const entries = parseCollection(body.entries, asEntry);
-  const articles = parseCollection(body.articles, asArticle);
+  const entries = parseChanges(body.entries, asEntry);
+  const articles = parseChanges(body.articles, asArticle);
 
   const client = await getPool().connect();
   try {
+    const entryResults: PushOutcome<Entry>[] = [];
+    const articleResults: PushOutcome<Article>[] = [];
+
     if (entries.changes.length || articles.changes.length) {
       await client.query("begin");
-      await pushEntries(client, uid, entries.changes);
-      await pushArticles(client, uid, articles.changes);
+      for (const change of entries.changes) {
+        entryResults.push(await pushEntry(client, uid, change));
+      }
+      for (const change of articles.changes) {
+        articleResults.push(await pushArticle(client, uid, change));
+      }
       await client.query("commit");
     }
 
-    return NextResponse.json({
-      entries: await pullEntries(client, uid, entries.since),
-      articles: await pullArticles(client, uid, articles.since),
-    });
+    const entryPull = await pull<Entry>(
+      client, "entries", ENTRY_COLS, entryRow as never, uid, entries.since
+    );
+    const articlePull = await pull<Article>(
+      client, "articles", ARTICLE_COLS, articleRow as never, uid, articles.since
+    );
+
+    const response: {
+      entries: SyncCollectionResult<Entry>;
+      articles: SyncCollectionResult<Article>;
+    } = {
+      entries: { results: entryResults, ...entryPull },
+      articles: { results: articleResults, ...articlePull },
+    };
+    return NextResponse.json(response);
   } catch (error) {
     await client.query("rollback").catch(() => {});
     console.error("sync failed", error);
