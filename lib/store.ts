@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-import { deleteEntry, listEntries, putEntry } from "@/lib/db";
+import { deleteEntry, listEntries, purgeTombstones, putEntry } from "@/lib/db";
 import {
   createEntry,
   isToday,
@@ -114,6 +114,7 @@ interface WriterState {
   ready: boolean;
   sidebarOpen: boolean;
   init: () => Promise<void>;
+  reload: () => Promise<void>;
   setContent: (content: string) => void;
   addEntry: () => void;
   select: (id: string) => void;
@@ -174,6 +175,30 @@ export const useWriter = create<WriterState>()((set, get) => ({
     }
 
     set({ entries, currentId, placeholder: randomPlaceholder(), ready: true });
+    void purgeTombstones();
+  },
+
+  reload: async () => {
+    const state = get();
+    if (!state.ready) return;
+    const fromDb = await listEntries();
+    const entries = fromDb.map((e) => {
+      const inState = state.entries.find((s) => s.id === e.id);
+      return inState && inState.updatedAt > e.updatedAt ? inState : e;
+    });
+
+    let { currentId } = state;
+    if (currentId && !entries.some((e) => e.id === currentId)) {
+      if (entries.length === 0) {
+        const fresh = createEntry();
+        void putEntry(fresh);
+        entries.push(fresh);
+        currentId = fresh.id;
+      } else {
+        currentId = entries[0].id;
+      }
+    }
+    set({ entries, currentId });
   },
 
   setContent: (content) => {

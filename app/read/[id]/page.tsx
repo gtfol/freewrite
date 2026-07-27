@@ -48,7 +48,8 @@ export default function ArticlePage({
     void getArticle(id).then((found) => {
       setArticle(found ?? null);
       if (found && !found.readAt) {
-        void putArticle({ ...found, readAt: Date.now() });
+        const now = Date.now();
+        void putArticle({ ...found, readAt: now, updatedAt: now });
       }
     });
   }, [id]);

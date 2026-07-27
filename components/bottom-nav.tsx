@@ -6,6 +6,7 @@ import { Clock, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { ChatPopover } from "@/components/chat-popover";
+import { SyncPopover } from "@/components/sync-popover";
 import { TimerButton } from "@/components/timer-button";
 import { useFullscreen } from "@/hooks/use-fullscreen";
 import { fontById, randomFont, STANDARD_FONTS } from "@/lib/fonts";
@@ -133,6 +134,7 @@ export function BottomNav() {
               <Moon className="size-4" />
             )}
           </NavButton>
+          <SyncPopover />
           <NavButton
             active={sidebarOpen}
             onClick={() => setSidebarOpen(!sidebarOpen)}

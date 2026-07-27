@@ -40,12 +40,15 @@ export function viaLabel(via: ArticleVia): string | null {
 }
 
 export function toArticle(data: ExtractedArticle, via: ArticleVia): Article {
+  const now = Date.now();
   return {
     id: crypto.randomUUID(),
     ...data,
-    savedAt: Date.now(),
+    savedAt: now,
     readAt: null,
     via,
+    updatedAt: now,
+    deletedAt: null,
   };
 }
 

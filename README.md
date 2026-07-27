@@ -13,6 +13,14 @@ npm install
 npm run dev
 ```
 
+## sync (optional)
+
+fully local by default. to sync across devices:
+
+1. create a supabase project, run `db/schema.sql` in its sql editor
+2. set `DATABASE_URL` (transaction pooler string), `BETTER_AUTH_SECRET` (`openssl rand -base64 32`), and `BETTER_AUTH_URL` (your deployment url)
+3. redeploy — a cloud icon appears in the nav
+
 ## stack
 
-next.js · tailwind · shadcn/ui · zustand · indexeddb
+next.js · tailwind · shadcn/ui · zustand · indexeddb · better auth + supabase (optional sync)
