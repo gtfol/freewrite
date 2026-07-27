@@ -299,11 +299,125 @@ function isLockedMediumPost(html: string): boolean {
   return MEDIUM_MARKERS.test(html) && MEDIUM_LOCKED.test(html);
 }
 
+// Medium renders rich embeds — above all GitHub gists, the standard way to
+// share code in older stories — as iframes on medium.com/media/… pages.
+// Sanitization strips iframes, so left alone every gist-embedded code block
+// silently vanishes. Before parsing, each media iframe is resolved
+// server-side: gists become real <pre><code> blocks (via gist.github.com's
+// public .json embed endpoint), anything else becomes a link to the embed.
+// Nothing is allowed to disappear without a trace.
+const MEDIA_SRC = /^(?:https?:)?\/\/medium\.com\/media\//;
+const GIST_SCRIPT = /https:\/\/gist\.github\.com\/[\w./-]+\.js(?:\?[^"'\s<>]*)?/;
+const MEDIA_EMBED_LIMIT = 12;
+const EMBED_TIMEOUT_MS = 10_000;
+const MAX_GIST_CHARS = 100_000;
+
+async function fetchEmbedText(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, {
+      headers: { "user-agent": USER_AGENT, accept: "*/*" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(EMBED_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    assertPublicHost(new URL(res.url));
+    const body = await res.text();
+    return body.length > MAX_HTML_BYTES ? null : body;
+  } catch {
+    return null;
+  }
+}
+
+// The embed endpoint's `div` holds the rendered gist: one .gist-file per
+// file, one td.js-file-line per code line, filename in the meta footer.
+function gistBlocks(payload: unknown, gistUrl: string): string | null {
+  if (typeof payload !== "object" || payload === null) return null;
+  const div = (payload as { div?: unknown }).div;
+  if (typeof div !== "string") return null;
+
+  const { document } = parseHTML(`<html><body>${div}</body></html>`);
+  const blocks: string[] = [];
+  for (const file of Array.from(document.querySelectorAll(".gist-file"))) {
+    const code = Array.from(file.querySelectorAll("td.js-file-line"))
+      .map((td) => td.textContent ?? "")
+      .join("\n")
+      .replace(/\s+$/, "");
+    if (!code.trim()) continue;
+    const name = file
+      .querySelector('.gist-meta a[href*="#file-"]')
+      ?.textContent?.trim();
+    blocks.push(
+      `<figure><pre><code>${escapeText(code)}</code></pre>` +
+        `<figcaption>${escapeText(name || "code")} · <a href="${gistUrl}">gist</a></figcaption></figure>`
+    );
+  }
+  const joined = blocks.join("\n");
+  return joined && joined.length <= MAX_GIST_CHARS ? joined : null;
+}
+
+async function resolveMediumEmbed(src: string): Promise<string> {
+  const link = (href: string, label: string) =>
+    `<p><a href="${href}">${escapeText(label)}</a></p>`;
+
+  const page = await fetchEmbedText(src);
+  if (page) {
+    const gistMatch = page.match(GIST_SCRIPT);
+    if (gistMatch) {
+      // Rebuilding from the origin + pathname keeps the fetch pinned to
+      // gist.github.com no matter what the media page contained.
+      const jsUrl = new URL(gistMatch[0]);
+      const file = jsUrl.searchParams.get("file");
+      const gistUrl = `https://gist.github.com${jsUrl.pathname.replace(/\.js$/, "")}`;
+      const json = await fetchEmbedText(
+        `${gistUrl}.json${file ? `?file=${encodeURIComponent(file)}` : ""}`
+      );
+      if (json) {
+        try {
+          const blocks = gistBlocks(JSON.parse(json), gistUrl);
+          if (blocks) return blocks;
+        } catch {
+          // fall through to the gist link
+        }
+      }
+      return link(gistUrl, "View code on GitHub Gist");
+    }
+    const inner = page.match(/<iframe[^>]+src="(https:\/\/[^"]+)"/i);
+    if (inner) return link(inner[1], "View embedded content");
+  }
+  return link(src, "View embedded content");
+}
+
+async function hydrateMediumEmbeds(html: string): Promise<string> {
+  if (!/\/\/medium\.com\/media\//.test(html)) return html;
+  try {
+    const { document } = parseHTML(html);
+    const frames = Array.from(document.querySelectorAll("iframe"))
+      .filter((f) => MEDIA_SRC.test(f.getAttribute("src") ?? ""))
+      .slice(0, MEDIA_EMBED_LIMIT);
+    if (frames.length === 0) return html;
+    await Promise.all(
+      frames.map(async (frame) => {
+        const src = new URL(frame.getAttribute("src")!, "https://medium.com").href;
+        const holder = document.createElement("div");
+        holder.innerHTML = await resolveMediumEmbed(src);
+        frame.replaceWith(...Array.from(holder.childNodes));
+      })
+    );
+    return document.toString();
+  } catch {
+    return html;
+  }
+}
+
 async function extractLockedMedium(url: URL): Promise<ExtractedArticle> {
   const base = process.env.FREEDIUM_BASE_URL ?? "https://freedium.cfd";
   try {
     const { html, finalUrl } = await fetchHtml(`${base}/${url.href}`);
-    const article = parseReadable(html, finalUrl, url.href);
+    const article = parseReadable(
+      await hydrateMediumEmbeds(html),
+      finalUrl,
+      url.href
+    );
     // Freedium's own error pages parse but come out short; a locked story
     // that made it through is never this thin.
     if (article.wordCount >= 150) {
@@ -655,6 +769,9 @@ export async function extract(
     const html = await readBody(res);
     if (isLockedMediumPost(html)) {
       return extractLockedMedium(url);
+    }
+    if (MEDIUM_MARKERS.test(html)) {
+      return parseReadable(await hydrateMediumEmbeds(html), finalUrl, url.href);
     }
     return parseReadable(html, finalUrl, url.href);
   }
