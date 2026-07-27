@@ -285,13 +285,17 @@ async function extractTweet(url: URL): Promise<ExtractedArticle> {
   };
 }
 
-// Medium serves member-only stories truncated to logged-out readers — the
-// locked portion never reaches the HTML, so neither Readability nor a
-// rendering browser (nor a browser's reader mode) can see it. Freedium, a
-// community mirror, can fetch the full story; locked posts are routed
-// through it while keeping the canonical Medium URL. Detection works off
-// page markers rather than hostnames so custom-domain publications count.
-// FREEDIUM_BASE_URL overrides the mirror for tests or when the domain moves.
+// Two things stand between a server and a Medium story: member-only
+// stories are truncated for logged-out readers (the locked text never
+// reaches the HTML), and Medium's bot wall 403s non-browser TLS
+// fingerprints outright — headers don't help, so on many hosts the direct
+// fetch never yields a page at all. Freedium, a community mirror, can fetch
+// the full story either way; it's used for locked posts and as the
+// fallback whenever medium.com refuses to serve us, keeping the canonical
+// Medium URL. Marker-based detection still covers custom-domain
+// publications that do serve HTML. FREEDIUM_BASE_URL overrides the mirror
+// for tests or when the domain moves.
+const MEDIUM_HOST = /(^|\.)medium\.com$/i;
 const MEDIUM_MARKERS = /com\.medium\.reader|cdn-client\.medium\.com/;
 const MEDIUM_LOCKED = /"isAccessibleForFree"\s*:\s*false|"locked"\s*:\s*true/;
 
@@ -421,21 +425,32 @@ async function resolveMediumEmbed(
 }
 
 async function hydrateMediumEmbeds(html: string): Promise<string> {
-  if (!/\/\/medium\.com\/media\//.test(html)) return html;
+  if (!/\/\/medium\.com\/media\/|gist\.github\.com/.test(html)) return html;
   try {
     const { document } = parseHTML(html);
-    const frames = Array.from(document.querySelectorAll("iframe"))
-      .filter((f) => MEDIA_SRC.test(f.getAttribute("src") ?? ""))
-      .slice(0, MEDIA_EMBED_LIMIT);
-    if (frames.length === 0) return html;
+    const frames = Array.from(document.querySelectorAll("iframe")).filter(
+      (f) => MEDIA_SRC.test(f.getAttribute("src") ?? "")
+    );
+    // Mirror pages (freedium among them) carry gist embeds the classic way,
+    // as <script src="…gist….js"> — which sanitization would silently eat.
+    const scripts = Array.from(document.querySelectorAll("script")).filter(
+      (s) => GIST_SCRIPT.test(s.getAttribute("src") ?? "")
+    );
+    const embeds = [...frames, ...scripts].slice(0, MEDIA_EMBED_LIMIT);
+    if (embeds.length === 0) return html;
     const stateHrefs = mediaHrefsFromState(html);
     await Promise.all(
-      frames.map(async (frame) => {
-        const src = new URL(frame.getAttribute("src")!, "https://medium.com").href;
-        const mediaId = new URL(src).pathname.split("/")[2] ?? "";
+      embeds.map(async (el) => {
         const holder = document.createElement("div");
-        holder.innerHTML = await resolveMediumEmbed(src, stateHrefs.get(mediaId));
-        frame.replaceWith(...Array.from(holder.childNodes));
+        if (el.tagName.toLowerCase() === "script") {
+          const src = new URL(el.getAttribute("src")!);
+          holder.innerHTML = await inlineGist(src.href, src.searchParams.get("file"));
+        } else {
+          const src = new URL(el.getAttribute("src")!, "https://medium.com").href;
+          const mediaId = new URL(src).pathname.split("/")[2] ?? "";
+          holder.innerHTML = await resolveMediumEmbed(src, stateHrefs.get(mediaId));
+        }
+        el.replaceWith(...Array.from(holder.childNodes));
       })
     );
     return document.toString();
@@ -444,7 +459,7 @@ async function hydrateMediumEmbeds(html: string): Promise<string> {
   }
 }
 
-async function extractLockedMedium(url: URL): Promise<ExtractedArticle> {
+async function extractViaFreedium(url: URL): Promise<ExtractedArticle> {
   const base = process.env.FREEDIUM_BASE_URL ?? "https://freedium.cfd";
   try {
     const { html, finalUrl } = await fetchHtml(`${base}/${url.href}`);
@@ -453,8 +468,8 @@ async function extractLockedMedium(url: URL): Promise<ExtractedArticle> {
       finalUrl,
       url.href
     );
-    // Freedium's own error pages parse but come out short; a locked story
-    // that made it through is never this thin.
+    // Freedium's own error pages parse but come out short; a story that
+    // made it through is never this thin.
     if (article.wordCount >= 150) {
       return { ...article, siteName: "Medium", via: "freedium" };
     }
@@ -462,8 +477,25 @@ async function extractLockedMedium(url: URL): Promise<ExtractedArticle> {
     // fall through — a truncated preview is worse than an honest error
   }
   throw new ExtractError(
-    "That's a member-only Medium story and the freedium mirror couldn't fetch it. If you can read it in your browser, copy the story and paste it in."
+    "Medium wouldn't hand this story to the server — it's member-only or behind Medium's bot wall — and the freedium mirror couldn't fetch it either. If you can read it in your browser, copy the story and paste it in."
   );
+}
+
+// medium.com URLs get their own flow: the direct fetch is still tried first
+// (some deployments pass the wall, and public stories parse best from the
+// source), but any refusal — 403 from the bot wall, timeouts, non-HTML
+// interstitials — falls back to the mirror instead of surfacing an error.
+async function extractMedium(url: URL): Promise<ExtractedArticle> {
+  let html: string;
+  let finalUrl: string;
+  try {
+    ({ html, finalUrl } = await fetchHtml(url.href));
+  } catch (error) {
+    if (!(error instanceof ExtractError)) throw error;
+    return extractViaFreedium(url);
+  }
+  if (isLockedMediumPost(html)) return extractViaFreedium(url);
+  return parseReadable(await hydrateMediumEmbeds(html), finalUrl, url.href);
 }
 
 const ARXIV_PATTERN =
@@ -771,6 +803,10 @@ export async function extract(
     return extractArxiv(url, arxivMatch[1]);
   }
 
+  if (MEDIUM_HOST.test(url.hostname)) {
+    return extractMedium(url);
+  }
+
   // PDFs can't be parsed here; the render service reads them natively, so
   // route them there without a wasted download.
   if (url.pathname.toLowerCase().endsWith(".pdf")) {
@@ -803,7 +839,7 @@ export async function extract(
   ) {
     const html = await readBody(res);
     if (isLockedMediumPost(html)) {
-      return extractLockedMedium(url);
+      return extractViaFreedium(url);
     }
     if (MEDIUM_MARKERS.test(html)) {
       return parseReadable(await hydrateMediumEmbeds(html), finalUrl, url.href);
