@@ -16,6 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { HighlightLayer } from "@/components/highlight-layer";
 import { ReaderNav } from "@/components/reader-nav";
 import {
   articleSite,
@@ -25,7 +26,8 @@ import {
   viaLabel,
 } from "@/lib/articles";
 import { deleteArticle, getArticle, putArticle } from "@/lib/db";
-import type { Article } from "@/lib/types";
+import { SYNC_APPLIED_EVENT } from "@/lib/sync";
+import type { Article, Highlight } from "@/lib/types";
 
 interface TrimSession {
   blocks: string[];
@@ -46,6 +48,9 @@ export default function ArticlePage({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [trim, setTrim] = useState<TrimSession | null>(null);
   const bodyRef = useRef<HTMLElement | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const trimActive = trim !== null;
 
   useEffect(() => {
     void getArticle(id).then((found) => {
@@ -56,6 +61,20 @@ export default function ArticlePage({
       }
     });
   }, [id]);
+
+  // Highlights (or the article itself) may change on another device while
+  // this one is open — pick up synced state, but never under an open trim
+  // session, whose Done would overwrite it with stale content.
+  useEffect(() => {
+    if (trimActive) return;
+    const refresh = () => {
+      void getArticle(id).then((found) => {
+        if (found) setArticle(found);
+      });
+    };
+    window.addEventListener(SYNC_APPLIED_EVENT, refresh);
+    return () => window.removeEventListener(SYNC_APPLIED_EVENT, refresh);
+  }, [id, trimActive]);
 
   // TeX arrives stored as <span class="math">…</span>; render it with KaTeX
   // after the HTML is in the DOM. KaTeX only loads for articles that have
@@ -122,6 +141,16 @@ export default function ArticlePage({
     );
   };
 
+  const saveHighlights = (highlights: Highlight[]) => {
+    const updated: Article = {
+      ...article,
+      highlights: highlights.length ? highlights : undefined,
+      updatedAt: Date.now(),
+    };
+    void putArticle(updated);
+    setArticle(updated);
+  };
+
   const finishTrim = async () => {
     if (!trim) return;
     const content = trim.blocks.join("\n");
@@ -173,7 +202,7 @@ export default function ArticlePage({
 
   return (
     <main className="min-h-dvh">
-      <div className="mx-auto max-w-[650px] px-6 pt-14 pb-32">
+      <div ref={wrapRef} className="relative mx-auto max-w-[650px] px-6 pt-14 pb-32">
         {trim && (
           <p className="mb-8 font-sans text-xs text-muted-foreground">
             Trimming — click a block to remove it. Nothing is saved until Done.
@@ -221,11 +250,20 @@ export default function ArticlePage({
             </div>
           ) : (
             <div
+              ref={contentRef}
               className="reader mt-10"
               dangerouslySetInnerHTML={{ __html: article.content }}
             />
           )}
         </article>
+        {!trim && (
+          <HighlightLayer
+            article={article}
+            contentRef={contentRef}
+            wrapRef={wrapRef}
+            onSave={saveHighlights}
+          />
+        )}
       </div>
 
       <ReaderNav

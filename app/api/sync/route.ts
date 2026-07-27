@@ -6,6 +6,7 @@ import { getPool } from "@/lib/server/db";
 import type {
   Article,
   Entry,
+  Highlight,
   PushOutcome,
   SyncChange,
   SyncCollectionResult,
@@ -19,6 +20,10 @@ const MAX_CHANGES = 200;
 const PULL_LIMIT = 200;
 const MAX_ENTRY_CHARS = 500_000;
 const MAX_ARTICLE_CHARS = 2_000_000;
+const MAX_HIGHLIGHTS = 500;
+const MAX_HIGHLIGHT_TEXT = 4_000;
+const MAX_HIGHLIGHT_CONTEXT = 200;
+const MAX_HIGHLIGHT_NOTE = 8_000;
 
 const isId = (v: unknown): v is string =>
   typeof v === "string" && v.length > 0 && v.length <= 64;
@@ -55,12 +60,55 @@ function asEntry(v: unknown): Entry | null {
   };
 }
 
+// Absent/empty → null; malformed → false. Malformed highlights must reject
+// the whole change (not be dropped): the client's hash covers them, and
+// storing that hash over different content would wedge reconciliation.
+function asHighlights(v: unknown): Highlight[] | null | false {
+  if (v === undefined || v === null) return null;
+  if (!Array.isArray(v) || v.length > MAX_HIGHLIGHTS) return false;
+  const out: Highlight[] = [];
+  for (const item of v) {
+    if (typeof item !== "object" || item === null) return false;
+    const h = item as Record<string, unknown>;
+    const text = asText(h.text, MAX_HIGHLIGHT_TEXT);
+    const context = (c: unknown): c is string =>
+      typeof c === "string" && c.length <= MAX_HIGHLIGHT_CONTEXT;
+    if (
+      !isId(h.id) ||
+      !text ||
+      !context(h.prefix) ||
+      !context(h.suffix) ||
+      !isStamp(h.createdAt) ||
+      !isStamp(h.updatedAt)
+    ) {
+      return false;
+    }
+    const note =
+      h.note === null || h.note === undefined
+        ? null
+        : asText(h.note, MAX_HIGHLIGHT_NOTE);
+    if (h.note != null && note === null) return false;
+    out.push({
+      id: h.id,
+      text,
+      prefix: h.prefix,
+      suffix: h.suffix,
+      note,
+      createdAt: h.createdAt,
+      updatedAt: h.updatedAt,
+    });
+  }
+  return out.length ? out : null;
+}
+
 function asArticle(v: unknown): Article | null {
   if (typeof v !== "object" || v === null) return null;
   const a = v as Record<string, unknown>;
   const content = asText(a.content, MAX_ARTICLE_CHARS);
   const url = asText(a.url, 2048);
   const title = asText(a.title, 1024);
+  const highlights = asHighlights(a.highlights);
+  if (highlights === false) return null;
   if (
     !isId(a.id) ||
     content === null ||
@@ -84,11 +132,15 @@ function asArticle(v: unknown): Article | null {
     excerpt: asOptText(a.excerpt, 4096),
     content,
     ...(contentOriginal !== null && { contentOriginal }),
+    ...(highlights !== null && { highlights }),
     wordCount: Math.max(0, Math.floor(a.wordCount)),
     savedAt: a.savedAt,
     readAt: (a.readAt as number | null | undefined) ?? null,
     via:
-      a.via === "archive" || a.via === "render" || a.via === "paste"
+      a.via === "archive" ||
+      a.via === "render" ||
+      a.via === "paste" ||
+      a.via === "freedium"
         ? a.via
         : null,
     updatedAt: a.updatedAt,
@@ -160,6 +212,7 @@ interface ArticleRowShape {
   saved_at: unknown;
   read_at: unknown;
   via: Article["via"];
+  highlights: Highlight[] | null;
   updated_at: unknown;
   deleted_at: unknown;
   seq: unknown;
@@ -177,6 +230,7 @@ function articleRow(r: ArticleRowShape): SyncRow<Article> {
       excerpt: r.excerpt,
       content: r.content,
       ...(r.content_original !== null && { contentOriginal: r.content_original }),
+      ...(r.highlights?.length && { highlights: r.highlights }),
       wordCount: r.word_count,
       savedAt: num(r.saved_at),
       readAt: numOrNull(r.read_at),
@@ -189,9 +243,14 @@ function articleRow(r: ArticleRowShape): SyncRow<Article> {
   };
 }
 
+// jsonb params must be stringified: node-pg serializes a bare JS array as a
+// postgres array literal, not json.
+const highlightsParam = (a: Article): string | null =>
+  a.highlights?.length ? JSON.stringify(a.highlights) : null;
+
 const ENTRY_COLS = "id, content, created_at, updated_at, deleted_at, seq, hash";
 const ARTICLE_COLS =
-  "id, url, title, byline, site_name, excerpt, content, content_original, word_count, saved_at, read_at, via, updated_at, deleted_at, seq, hash";
+  "id, url, title, byline, site_name, excerpt, content, content_original, word_count, saved_at, read_at, via, highlights, updated_at, deleted_at, seq, hash";
 
 // Compare-and-swap write. The update predicate carries the expected seq, so a
 // concurrent write from another device turns this into a clean conflict
@@ -262,14 +321,14 @@ async function pushArticle(
   const inserted = await client.query(
     `insert into articles (id, user_id, url, title, byline, site_name, excerpt,
        content, content_original, word_count, saved_at, read_at, via,
-       updated_at, deleted_at, hash)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+       highlights, updated_at, deleted_at, hash)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
      on conflict (id) do nothing
      returning seq`,
     [
       a.id, uid, a.url, a.title, a.byline, a.siteName, a.excerpt,
       a.content, a.contentOriginal ?? null, a.wordCount, a.savedAt, a.readAt,
-      a.via, a.updatedAt, a.deletedAt, change.hash,
+      a.via, highlightsParam(a), a.updatedAt, a.deletedAt, change.hash,
     ]
   );
   if (inserted.rowCount) {
@@ -292,14 +351,14 @@ async function pushArticle(
       const updated = await client.query(
         `update articles set url = $3, title = $4, byline = $5, site_name = $6,
            excerpt = $7, content = $8, content_original = $9, word_count = $10,
-           read_at = $11, via = $12, updated_at = $13, deleted_at = $14,
-           hash = $15, seq = nextval('sync_seq')
-         where id = $1 and user_id = $2 and seq = $16
+           read_at = $11, via = $12, highlights = $13, updated_at = $14,
+           deleted_at = $15, hash = $16, seq = nextval('sync_seq')
+         where id = $1 and user_id = $2 and seq = $17
          returning seq`,
         [
           a.id, uid, a.url, a.title, a.byline, a.siteName, a.excerpt,
           a.content, a.contentOriginal ?? null, a.wordCount, a.readAt, a.via,
-          a.updatedAt, a.deletedAt, change.hash, current.seq,
+          highlightsParam(a), a.updatedAt, a.deletedAt, change.hash, current.seq,
         ]
       );
       if (updated.rowCount) {

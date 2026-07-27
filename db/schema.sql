@@ -77,6 +77,7 @@ create table if not exists articles (
   saved_at bigint not null,
   read_at bigint,
   via text,
+  highlights jsonb,
   updated_at bigint not null,
   deleted_at bigint,
   seq bigint not null default nextval('sync_seq'),
