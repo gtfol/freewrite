@@ -13,6 +13,8 @@ export function enabledProviders() {
     google: Boolean(
       process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
     ),
+    // Escape hatch for local dev without OAuth credentials.
+    email: Boolean(process.env.EMAIL_PASSWORD_AUTH),
   };
 }
 
@@ -24,6 +26,7 @@ export function getAuth() {
       database: getPool(),
       secret: process.env.BETTER_AUTH_SECRET,
       baseURL: process.env.BETTER_AUTH_URL,
+      emailAndPassword: { enabled: providers.email },
       socialProviders: {
         ...(providers.google && {
           google: {

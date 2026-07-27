@@ -30,8 +30,28 @@ export interface Article {
   deletedAt?: number | null;
 }
 
+// A synced record travels with its server revision (the global seq at the
+// time of its last accepted write) and its content hash.
+export interface SyncRow<T> {
+  record: T;
+  rev: number;
+  hash: string;
+}
+
+export interface SyncChange<T> {
+  record: T;
+  // Server revision this edit was based on; 0 = client believes it's new.
+  baseRev: number;
+  hash: string;
+}
+
+export type PushOutcome<T> =
+  | { id: string; status: "ok"; rev: number; hash: string }
+  | { id: string; status: "conflict"; server: SyncRow<T> };
+
 export interface SyncCollectionResult<T> {
-  rows: T[];
+  results: PushOutcome<T>[];
+  rows: SyncRow<T>[];
   cursor: number;
   hasMore: boolean;
 }
@@ -39,6 +59,22 @@ export interface SyncCollectionResult<T> {
 export interface SyncResponse {
   entries: SyncCollectionResult<Entry>;
   articles: SyncCollectionResult<Article>;
+}
+
+export interface ManifestItem {
+  id: string;
+  hash: string;
+  rev: number;
+}
+
+export interface SyncManifest {
+  entries: ManifestItem[];
+  articles: ManifestItem[];
+}
+
+export interface SyncDigest {
+  entries: { digest: string; count: number };
+  articles: { digest: string; count: number };
 }
 
 export interface ExtractedArticle {
