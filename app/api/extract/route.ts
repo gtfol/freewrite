@@ -9,7 +9,7 @@ export const maxDuration = 60;
 const SOURCES: ExtractSource[] = ["direct", "archive", "paste"];
 
 export async function POST(request: Request) {
-  let body: { url?: unknown; source?: unknown; html?: unknown };
+  let body: { url?: unknown; source?: unknown; html?: unknown; text?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -24,10 +24,13 @@ export async function POST(request: Request) {
     ? (body.source as ExtractSource)
     : "direct";
 
-  const html = typeof body.html === "string" ? body.html : undefined;
+  const paste = {
+    html: typeof body.html === "string" ? body.html : undefined,
+    text: typeof body.text === "string" ? body.text : undefined,
+  };
 
   try {
-    const article = await extract(body.url, source, html);
+    const article = await extract(body.url, source, paste);
     return NextResponse.json(article);
   } catch (error) {
     if (error instanceof ExtractError) {

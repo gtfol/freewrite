@@ -20,12 +20,12 @@ import { useMounted } from "@/hooks/use-mounted";
 import {
   articleDate,
   articleSite,
-  plainTextToHtml,
   readingTime,
   requestExtract,
   sourceToVia,
   toArticle,
   viaLabel,
+  type PastedClipboard,
 } from "@/lib/articles";
 import { deleteArticle, listArticles, putArticle } from "@/lib/db";
 import { SYNC_APPLIED_EVENT } from "@/lib/sync";
@@ -111,13 +111,13 @@ export default function ReadPage() {
     url: string,
     source: ExtractSource,
     tried: ExtractSource[] = [],
-    html?: string
+    paste?: PastedClipboard
   ) => {
     if (!url.trim()) return;
     setState({ kind: "loading", source });
     const nowTried = [...tried, source];
     try {
-      const data = await requestExtract(url, source, html);
+      const data = await requestExtract(url, source, paste);
       if (data.wordCount < THIN_WORD_COUNT && source === "direct") {
         setState({ kind: "thin", data, url, source, tried: nowTried });
       } else {
@@ -216,12 +216,10 @@ export default function ReadPage() {
                 const html = e.clipboardData.getData("text/html");
                 const text = e.clipboardData.getData("text/plain");
                 if (!html && !text.trim()) return;
-                void submit(
-                  state.url,
-                  "paste",
-                  state.tried,
-                  html || plainTextToHtml(text)
-                );
+                void submit(state.url, "paste", state.tried, {
+                  html: html || undefined,
+                  text: text.trim() ? text : undefined,
+                });
               }}
               placeholder="Paste here"
               className="mt-3 h-24 w-full resize-none rounded-md border border-border bg-transparent p-3 text-sm outline-none placeholder:text-muted-foreground/60 focus:border-foreground/40"

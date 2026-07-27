@@ -1,5 +1,6 @@
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
+import { marked } from "marked";
 import sanitizeHtml from "sanitize-html";
 
 import type { ExtractedArticle, ExtractSource } from "@/lib/types";
@@ -297,16 +298,73 @@ async function extractArxiv(url: URL, id: string): Promise<ExtractedArticle> {
 }
 
 // Content the user copied out of their own browser tab — the one path that
+export interface PastedPayload {
+  html?: string;
+  text?: string;
+}
+
+function looksLikeMarkdown(text: string): boolean {
+  const sample = text.slice(0, 10_000);
+  let strong = 0;
+  let weak = 0;
+  if (/^#{1,6}\s+\S/m.test(sample)) strong++;
+  if (/^```/m.test(sample)) strong++;
+  if (/^\|.+\|\s*$/m.test(sample) && /^\|[\s:|-]+\|\s*$/m.test(sample)) strong++;
+  if (/\[[^\]\n]+\]\([^)\s]+\)/.test(sample)) strong++;
+  if ((sample.match(/^[-*+]\s+\S/gm)?.length ?? 0) >= 2) weak++;
+  if ((sample.match(/^\d+[.)]\s+\S/gm)?.length ?? 0) >= 2) weak++;
+  if (/^>\s?\S/m.test(sample)) weak++;
+  if (/\*\*[^*\n]+\*\*|__[^_\n]+__/.test(sample)) weak++;
+  if (/`[^`\n]+`/.test(sample)) weak++;
+  return strong >= 1 || weak >= 2;
+}
+
+// Rich pastes that add no block structure beyond paragraphs are usually an
+// editor's syntax-highlighted wrapper around source text, not a rendered page.
+function hasBlockStructure(sanitizedHtml: string): boolean {
+  return /<(h[1-6]|ul|ol|table|blockquote)\b/i.test(sanitizedHtml);
+}
+
+function plainTextAsHtml(text: string): string {
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return text
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => `<p>${escape(block).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
 // works for pages a server can never fetch (logins, paywalls, JS-only apps).
 // Nothing is fetched, so private hosts are fine and Readability is skipped:
 // the user already chose what to copy.
-function extractPasted(html: string, rawUrl: string): ExtractedArticle {
+function extractPasted(paste: PastedPayload, rawUrl: string): ExtractedArticle {
   const url = parseUrl(rawUrl);
-  if (html.length > MAX_HTML_BYTES) {
+  const html = paste.html?.trim() ? paste.html : null;
+  const text = paste.text?.trim() ? paste.text : null;
+  if ((html?.length ?? 0) > MAX_HTML_BYTES || (text?.length ?? 0) > MAX_HTML_BYTES) {
     throw new ExtractError("That paste is too large to save");
   }
 
-  const content = sanitizeContent(html, url.href, { discardChrome: true });
+  const fromHtml = html
+    ? sanitizeContent(html, url.href, { discardChrome: true })
+    : null;
+
+  let content: string;
+  if (text && looksLikeMarkdown(text) && (!fromHtml || !hasBlockStructure(fromHtml))) {
+    content = sanitizeContent(
+      marked.parse(text, { gfm: true, async: false }),
+      url.href
+    );
+  } else if (fromHtml) {
+    content = fromHtml;
+  } else if (text) {
+    content = sanitizeContent(plainTextAsHtml(text), url.href);
+  } else {
+    throw new ExtractError("Nothing was pasted");
+  }
+
   const wordCount = countWords(content);
   if (wordCount === 0) {
     throw new ExtractError("That paste didn't contain any readable text");
@@ -329,11 +387,10 @@ function extractPasted(html: string, rawUrl: string): ExtractedArticle {
 export async function extract(
   rawUrl: string,
   source: ExtractSource,
-  pastedHtml?: string
+  paste?: PastedPayload
 ): Promise<ExtractedArticle> {
   if (source === "paste") {
-    if (!pastedHtml?.trim()) throw new ExtractError("Nothing was pasted");
-    return extractPasted(pastedHtml, rawUrl);
+    return extractPasted(paste ?? {}, rawUrl);
   }
 
   const url = normalizeUrl(rawUrl);
