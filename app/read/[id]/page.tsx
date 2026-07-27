@@ -27,7 +27,10 @@ import type { Article } from "@/lib/types";
 
 interface TrimSession {
   blocks: string[];
-  undo: string[][];
+  undo: { blocks: string[]; anchor: number | null }[];
+  // Where the last removal happened; shift-click removes the range between
+  // this gap and the clicked block.
+  anchor: number | null;
   // The session's starting blocks, joined — stored as contentOriginal on the
   // first trim so a later Restore round-trips to byte-identical content.
   original: string;
@@ -82,16 +85,31 @@ export default function ArticlePage({
     .filter(Boolean)
     .join(" · ");
 
-  const removeBlock = (index: number, mode: "one" | "above" | "below") => {
+  const removeBlock = (index: number, range: boolean) => {
     setTrim((session) => {
       if (!session) return session;
-      const blocks =
-        mode === "above"
-          ? session.blocks.slice(index + 1)
-          : mode === "below"
-            ? session.blocks.slice(0, index)
-            : session.blocks.filter((_, i) => i !== index);
-      return { ...session, blocks, undo: [...session.undo, session.blocks] };
+      let start = index;
+      let end = index;
+      if (range && session.anchor !== null) {
+        if (index >= session.anchor) {
+          start = Math.max(0, session.anchor);
+        } else {
+          end = Math.min(session.blocks.length - 1, session.anchor - 1);
+        }
+      }
+      const blocks = [
+        ...session.blocks.slice(0, start),
+        ...session.blocks.slice(end + 1),
+      ];
+      return {
+        ...session,
+        blocks,
+        anchor: start,
+        undo: [
+          ...session.undo,
+          { blocks: session.blocks, anchor: session.anchor },
+        ],
+      };
     });
   };
 
@@ -118,7 +136,7 @@ export default function ArticlePage({
       !!article.contentOriginal && article.contentOriginal !== article.content,
     onStart: () => {
       const blocks = splitBlocks(article.content);
-      setTrim({ blocks, undo: [], original: blocks.join("\n") });
+      setTrim({ blocks, undo: [], anchor: null, original: blocks.join("\n") });
     },
     onDone: () => void finishTrim(),
     onUndo: () =>
@@ -126,7 +144,7 @@ export default function ArticlePage({
         session && session.undo.length > 0
           ? {
               ...session,
-              blocks: session.undo[session.undo.length - 1],
+              ...session.undo[session.undo.length - 1],
               undo: session.undo.slice(0, -1),
             }
           : session
@@ -137,7 +155,11 @@ export default function ArticlePage({
           ? {
               ...session,
               blocks: splitBlocks(article.contentOriginal),
-              undo: [...session.undo, session.blocks],
+              anchor: null,
+              undo: [
+                ...session.undo,
+                { blocks: session.blocks, anchor: session.anchor },
+              ],
             }
           : session
       ),
@@ -149,9 +171,9 @@ export default function ArticlePage({
       <div className="mx-auto max-w-[650px] px-6 pt-14 pb-32">
         {trim && (
           <p className="mb-8 font-sans text-xs text-muted-foreground">
-            Trimming — click a block to remove it. Shift-click removes it and
-            everything above; alt-click it and everything below. Nothing is
-            saved until Done.
+            Trimming — click a block to remove it; shift-click removes
+            everything between your last click and it. Nothing is saved until
+            Done.
           </p>
         )}
         <article style={{ fontFamily: "var(--font-crimson), Georgia, serif" }}>
@@ -171,17 +193,14 @@ export default function ArticlePage({
             </a>
           </p>
           {trim ? (
-            <div className="reader mt-10">
+            <div className="reader mt-10 select-none">
               {trim.blocks.map((block, i) => (
                 <div
                   key={`${i}-${block.length}`}
                   onClickCapture={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    removeBlock(
-                      i,
-                      e.shiftKey ? "above" : e.altKey ? "below" : "one"
-                    );
+                    removeBlock(i, e.shiftKey);
                   }}
                   title="Click to remove"
                   className="-mx-2 cursor-pointer rounded-sm px-2 transition-colors hover:bg-destructive/10"
