@@ -67,13 +67,14 @@ function assertPublicHost(url: URL): void {
   }
 }
 
-async function fetchHtml(url: string): Promise<{ html: string; finalUrl: string }> {
+async function fetchRaw(url: string): Promise<Response> {
   let res: Response;
   try {
     res = await fetch(url, {
       headers: {
         "user-agent": USER_AGENT,
-        accept: "text/html,application/xhtml+xml,*/*;q=0.8",
+        accept:
+          "text/html,application/xhtml+xml,text/markdown;q=0.9,text/plain;q=0.8,*/*;q=0.5",
         "accept-language": "en-US,en;q=0.9",
       },
       redirect: "follow",
@@ -86,17 +87,24 @@ async function fetchHtml(url: string): Promise<{ html: string; finalUrl: string 
     throw new ExtractError(`The page responded with ${res.status}`);
   }
   assertPublicHost(new URL(res.url));
+  return res;
+}
 
+async function readBody(res: Response): Promise<string> {
+  const body = await res.text();
+  if (body.length > MAX_HTML_BYTES) {
+    throw new ExtractError("That page is too large to parse");
+  }
+  return body;
+}
+
+async function fetchHtml(url: string): Promise<{ html: string; finalUrl: string }> {
+  const res = await fetchRaw(url);
   const contentType = res.headers.get("content-type") ?? "";
   if (contentType && !/text\/html|application\/xhtml/.test(contentType)) {
     throw new ExtractError("That URL isn't an HTML page");
   }
-
-  const html = await res.text();
-  if (html.length > MAX_HTML_BYTES) {
-    throw new ExtractError("That page is too large to parse");
-  }
-  return { html, finalUrl: res.url };
+  return { html: await readBody(res), finalUrl: res.url };
 }
 
 function absolutize(value: string | undefined, base: string): string | null {
@@ -203,7 +211,7 @@ function parseReadable(
   if (!result?.content) {
     if (looksLikeJsShell(html)) {
       throw new ExtractError(
-        "That page is a JavaScript app — it has no static text to pull. Open it in your browser, copy everything, and paste it in instead."
+        "That page is a JavaScript app — it has no static text to pull. Try the rendered copy, or open it in your browser, copy everything, and paste it in."
       );
     }
     throw new ExtractError("Couldn't find readable content on that page");
@@ -297,7 +305,89 @@ async function extractArxiv(url: URL, id: string): Promise<ExtractedArticle> {
   return { ...article, siteName: article.siteName ?? "arXiv" };
 }
 
-// Content the user copied out of their own browser tab — the one path that
+function extractFromMarkdown(
+  md: string,
+  sourceUrl: string,
+  canonicalUrl: string,
+  meta?: { title?: string | null; excerpt?: string | null }
+): ExtractedArticle {
+  const html = marked.parse(md, { async: false });
+  const content = sanitizeContent(html, sourceUrl);
+  const wordCount = countWords(content);
+  if (wordCount === 0) {
+    throw new ExtractError("Couldn't find readable content in that file");
+  }
+
+  const { document } = parseHTML(`<article>${content}</article>`);
+  const heading = document.querySelector("h1, h2")?.textContent?.trim();
+  const canonical = new URL(canonicalUrl);
+  const filename = canonical.pathname
+    .split("/")
+    .pop()
+    ?.replace(/\.(md|markdown|txt)$/i, "");
+
+  return {
+    url: canonicalUrl,
+    title:
+      meta?.title?.trim() ||
+      heading?.slice(0, 160) ||
+      filename ||
+      canonical.hostname.replace(/^www\./, ""),
+    byline: null,
+    siteName: null,
+    excerpt: meta?.excerpt?.trim() || null,
+    content,
+    wordCount,
+  };
+}
+
+// Rendered copy via r.jina.ai: a real browser fetch on their side, markdown
+// back on ours. Covers PDFs and JS-rendered pages; bot-walled hosts (e.g.
+// Cloudflare-challenged ones) still fail here — that's what paste is for.
+// JINA_API_KEY (optional) raises the service's rate limits; JINA_BASE_URL
+// overrides the endpoint for tests or self-hosted readers.
+async function extractRendered(url: URL): Promise<ExtractedArticle> {
+  const base = process.env.JINA_BASE_URL ?? "https://r.jina.ai";
+  const headers: Record<string, string> = { accept: "application/json" };
+  if (process.env.JINA_API_KEY) {
+    headers.authorization = `Bearer ${process.env.JINA_API_KEY}`;
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${base}/${url.href}`, {
+      headers,
+      signal: AbortSignal.timeout(50_000),
+    });
+  } catch {
+    throw new ExtractError("The rendering service didn't respond in time");
+  }
+  if (res.status === 429) {
+    throw new ExtractError(
+      "The rendering service is rate-limited right now — wait a minute and try again"
+    );
+  }
+  if (!res.ok) {
+    throw new ExtractError(`The rendering service responded with ${res.status}`);
+  }
+
+  const body = (await res.json().catch(() => null)) as {
+    data?: { title?: string; description?: string; content?: string };
+  } | null;
+  const md = body?.data?.content;
+  if (!md?.trim()) {
+    throw new ExtractError("The rendering service returned nothing readable");
+  }
+  if (md.length > MAX_HTML_BYTES) {
+    throw new ExtractError("That page is too large to parse");
+  }
+
+  return extractFromMarkdown(md, url.href, url.href, {
+    title: body?.data?.title,
+    excerpt: body?.data?.description,
+  });
+}
+
 export interface PastedPayload {
   html?: string;
   text?: string;
@@ -336,6 +426,7 @@ function plainTextAsHtml(text: string): string {
     .join("");
 }
 
+// Content the user copied out of their own browser tab — the one path that
 // works for pages a server can never fetch (logins, paywalls, JS-only apps).
 // Nothing is fetched, so private hosts are fine and Readability is skipped:
 // the user already chose what to copy.
@@ -384,6 +475,8 @@ function extractPasted(paste: PastedPayload, rawUrl: string): ExtractedArticle {
   };
 }
 
+const MARKDOWN_EXT = /\.(md|markdown|txt)$/i;
+
 export async function extract(
   rawUrl: string,
   source: ExtractSource,
@@ -395,11 +488,8 @@ export async function extract(
 
   const url = normalizeUrl(rawUrl);
 
-  if (source === "archive") {
-    const { html, finalUrl } = await fetchHtml(
-      `https://archive.ph/newest/${url.href}`
-    );
-    return parseReadable(html, finalUrl, url.href);
+  if (source === "render") {
+    return extractRendered(url);
   }
 
   if (TWEET_PATTERN.test(url.href)) {
@@ -411,6 +501,40 @@ export async function extract(
     return extractArxiv(url, arxivMatch[1]);
   }
 
-  const { html, finalUrl } = await fetchHtml(url.href);
-  return parseReadable(html, finalUrl, url.href);
+  // PDFs can't be parsed here; the render service reads them natively, so
+  // route them there without a wasted download.
+  if (url.pathname.toLowerCase().endsWith(".pdf")) {
+    return extractRendered(url);
+  }
+
+  const res = await fetchRaw(url.href);
+  const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
+  const finalUrl = res.url;
+  const finalPath = new URL(finalUrl).pathname.toLowerCase();
+
+  if (contentType.includes("application/pdf") || finalPath.endsWith(".pdf")) {
+    await res.body?.cancel();
+    return extractRendered(url);
+  }
+
+  if (
+    contentType.includes("text/markdown") ||
+    contentType.includes("text/plain") ||
+    (!contentType.includes("html") &&
+      (MARKDOWN_EXT.test(finalPath) || MARKDOWN_EXT.test(url.pathname)))
+  ) {
+    return extractFromMarkdown(await readBody(res), finalUrl, url.href);
+  }
+
+  if (
+    !contentType ||
+    contentType.includes("text/html") ||
+    contentType.includes("application/xhtml")
+  ) {
+    return parseReadable(await readBody(res), finalUrl, url.href);
+  }
+
+  throw new ExtractError(
+    "That link isn't a format the reader can parse — try the rendered copy"
+  );
 }
