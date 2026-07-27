@@ -34,6 +34,7 @@ export function sourceToVia(source: ExtractSource): ArticleVia {
 export function viaLabel(via: ArticleVia): string | null {
   if (via === "archive") return "via archive.ph";
   if (via === "render") return "via r.jina.ai";
+  if (via === "paste") return "pasted";
   return null;
 }
 
@@ -52,14 +53,26 @@ export function articleText(article: Article): string {
   return (doc.body.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
+export function plainTextToHtml(text: string): string {
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return text
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => `<p>${escape(block).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
 export async function requestExtract(
   url: string,
-  source: ExtractSource
+  source: ExtractSource,
+  html?: string
 ): Promise<ExtractedArticle> {
   const res = await fetch("/api/extract", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ url, source }),
+    body: JSON.stringify({ url, source, html }),
   });
   const body = await res.json().catch(() => null);
   if (!res.ok) {

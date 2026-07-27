@@ -5,9 +5,11 @@ export interface Entry {
   content: string;
 }
 
-export type ExtractSource = "direct" | "archive" | "render";
+export type ExtractSource = "direct" | "archive" | "paste";
 
-export type ArticleVia = "archive" | "render" | null;
+// "render" only survives as a label for articles saved while the
+// r.jina.ai fallback existed.
+export type ArticleVia = "archive" | "render" | "paste" | null;
 
 export interface Article {
   id: string;

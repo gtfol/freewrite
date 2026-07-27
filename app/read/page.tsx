@@ -20,6 +20,7 @@ import { useMounted } from "@/hooks/use-mounted";
 import {
   articleDate,
   articleSite,
+  plainTextToHtml,
   readingTime,
   requestExtract,
   sourceToVia,
@@ -42,7 +43,8 @@ type AddState =
       url: string;
       source: ExtractSource;
       tried: ExtractSource[];
-    };
+    }
+  | { kind: "paste"; url: string; tried: ExtractSource[] };
 
 const actionClass =
   "text-[13px] text-muted-foreground transition-colors hover:text-foreground";
@@ -53,23 +55,23 @@ const retryClass =
 const LOADING_LABELS: Record<ExtractSource, string> = {
   direct: "Saving…",
   archive: "Checking archive…",
-  render: "Rendering…",
+  paste: "Saving…",
 };
 
 function RetryButtons({
   tried,
   onRetry,
+  onPaste,
 }: {
   tried: ExtractSource[];
   onRetry: (source: ExtractSource) => void;
+  onPaste: () => void;
 }) {
   return (
     <>
-      {!tried.includes("render") && (
-        <button className={retryClass} onClick={() => onRetry("render")}>
-          Try the rendered copy
-        </button>
-      )}
+      <button className={retryClass} onClick={onPaste}>
+        Paste the text yourself
+      </button>
       {!tried.includes("archive") && (
         <button className={retryClass} onClick={() => onRetry("archive")}>
           Try the archive.ph copy
@@ -101,13 +103,14 @@ export default function ReadPage() {
   const submit = async (
     url: string,
     source: ExtractSource,
-    tried: ExtractSource[] = []
+    tried: ExtractSource[] = [],
+    html?: string
   ) => {
     if (!url.trim()) return;
     setState({ kind: "loading", source });
     const nowTried = [...tried, source];
     try {
-      const data = await requestExtract(url, source);
+      const data = await requestExtract(url, source, html);
       if (data.wordCount < THIN_WORD_COUNT && source === "direct") {
         setState({ kind: "thin", data, url, source, tried: nowTried });
       } else {
@@ -165,6 +168,9 @@ export default function ReadPage() {
               <RetryButtons
                 tried={state.tried}
                 onRetry={(source) => void submit(state.url, source, state.tried)}
+                onPaste={() =>
+                  setState({ kind: "paste", url: state.url, tried: state.tried })
+                }
               />
               <button
                 className={actionClass}
@@ -173,6 +179,40 @@ export default function ReadPage() {
                 Dismiss
               </button>
             </div>
+          </div>
+        )}
+
+        {state.kind === "paste" && (
+          <div className="mt-4 text-[13px] text-muted-foreground">
+            <p>
+              Open the page in your browser, select everything on it, copy,
+              then paste below. Formatting comes along when the page allows it.
+            </p>
+            <textarea
+              autoFocus
+              value=""
+              onChange={() => {}}
+              onPaste={(e) => {
+                e.preventDefault();
+                const html = e.clipboardData.getData("text/html");
+                const text = e.clipboardData.getData("text/plain");
+                if (!html && !text.trim()) return;
+                void submit(
+                  state.url,
+                  "paste",
+                  state.tried,
+                  html || plainTextToHtml(text)
+                );
+              }}
+              placeholder="Paste here"
+              className="mt-3 h-24 w-full resize-none rounded-md border border-border bg-transparent p-3 text-sm outline-none placeholder:text-muted-foreground/60 focus:border-foreground/40"
+            />
+            <button
+              className={actionClass}
+              onClick={() => setState({ kind: "idle" })}
+            >
+              Cancel
+            </button>
           </div>
         )}
 
@@ -186,6 +226,9 @@ export default function ReadPage() {
               <RetryButtons
                 tried={state.tried}
                 onRetry={(source) => void submit(state.url, source, state.tried)}
+                onPaste={() =>
+                  setState({ kind: "paste", url: state.url, tried: state.tried })
+                }
               />
               <button
                 className={actionClass}

@@ -10,6 +10,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { useFullscreen } from "@/hooks/use-fullscreen";
 import { articleText } from "@/lib/articles";
 import {
   articleChatUrl,
@@ -87,6 +88,7 @@ export function ReaderNav({
   onDelete?: () => void;
 }) {
   const { theme, setTheme } = useTheme();
+  const fullscreen = useFullscreen();
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 bg-background">
@@ -124,6 +126,18 @@ export function ReaderNav({
           <Link href="/" className={itemClass}>
             Write
           </Link>
+        )}
+        {fullscreen.supported && (
+          <>
+            <Dot />
+            <button
+              type="button"
+              onClick={fullscreen.toggle}
+              className={itemClass}
+            >
+              {fullscreen.active ? "Minimize" : "Fullscreen"}
+            </button>
+          </>
         )}
         <Dot />
         <button

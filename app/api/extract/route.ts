@@ -6,10 +6,10 @@ import type { ExtractSource } from "@/lib/types";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const SOURCES: ExtractSource[] = ["direct", "archive", "render"];
+const SOURCES: ExtractSource[] = ["direct", "archive", "paste"];
 
 export async function POST(request: Request) {
-  let body: { url?: unknown; source?: unknown };
+  let body: { url?: unknown; source?: unknown; html?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -24,8 +24,10 @@ export async function POST(request: Request) {
     ? (body.source as ExtractSource)
     : "direct";
 
+  const html = typeof body.html === "string" ? body.html : undefined;
+
   try {
-    const article = await extract(body.url, source);
+    const article = await extract(body.url, source, html);
     return NextResponse.json(article);
   } catch (error) {
     if (error instanceof ExtractError) {

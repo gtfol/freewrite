@@ -11,7 +11,7 @@ const MAX_HTML_BYTES = 5 * 1024 * 1024;
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
-export function normalizeUrl(raw: string): URL {
+function parseUrl(raw: string): URL {
   const trimmed = raw.trim();
   if (!trimmed) throw new ExtractError("No URL provided");
   const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(trimmed)
@@ -24,6 +24,14 @@ export function normalizeUrl(raw: string): URL {
   } catch {
     throw new ExtractError("That doesn't look like a valid URL");
   }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new ExtractError("Only http(s) URLs are supported");
+  }
+  return url;
+}
+
+export function normalizeUrl(raw: string): URL {
+  const url = parseUrl(raw);
   assertPublicHost(url);
   return url;
 }
@@ -102,8 +110,21 @@ function absolutize(value: string | undefined, base: string): string | null {
   }
 }
 
-function sanitizeContent(html: string, baseUrl: string): string {
+// Pasted pages arrive with app chrome around the text; these tags (and
+// their text) are noise there, whereas Readability output never has them.
+const CHROME_TAGS = [
+  "script", "style", "noscript", "textarea", "option", "select",
+  "button", "nav", "form", "dialog", "svg", "canvas", "iframe",
+  "audio", "video",
+];
+
+function sanitizeContent(
+  html: string,
+  baseUrl: string,
+  { discardChrome = false } = {}
+): string {
   return sanitizeHtml(html, {
+    ...(discardChrome ? { nonTextTags: CHROME_TAGS } : {}),
     allowedTags: [
       "h1", "h2", "h3", "h4", "h5", "h6",
       "p", "a", "ul", "ol", "li", "blockquote",
@@ -181,7 +202,7 @@ function parseReadable(
   if (!result?.content) {
     if (looksLikeJsShell(html)) {
       throw new ExtractError(
-        "That page is a JavaScript app — it has no static text to pull. The rendered copy usually works."
+        "That page is a JavaScript app — it has no static text to pull. Open it in your browser, copy everything, and paste it in instead."
       );
     }
     throw new ExtractError("Couldn't find readable content on that page");
@@ -275,44 +296,46 @@ async function extractArxiv(url: URL, id: string): Promise<ExtractedArticle> {
   return { ...article, siteName: article.siteName ?? "arXiv" };
 }
 
-async function extractRendered(url: URL): Promise<ExtractedArticle> {
-  const headers: Record<string, string> = {
-    "user-agent": USER_AGENT,
-    "x-return-format": "html",
-  };
-  if (process.env.JINA_API_KEY) {
-    headers.authorization = `Bearer ${process.env.JINA_API_KEY}`;
-  }
-
-  let res: Response;
-  try {
-    res = await fetch(`https://r.jina.ai/${url.href}`, {
-      headers,
-      signal: AbortSignal.timeout(45_000),
-    });
-  } catch {
-    throw new ExtractError("The rendering service didn't respond in time");
-  }
-  if (res.status === 429) {
-    throw new ExtractError(
-      "The rendering service is rate-limited right now — wait a minute and try again"
-    );
-  }
-  if (!res.ok) {
-    throw new ExtractError(`The rendering service responded with ${res.status}`);
-  }
-
-  const html = await res.text();
+// Content the user copied out of their own browser tab — the one path that
+// works for pages a server can never fetch (logins, paywalls, JS-only apps).
+// Nothing is fetched, so private hosts are fine and Readability is skipped:
+// the user already chose what to copy.
+function extractPasted(html: string, rawUrl: string): ExtractedArticle {
+  const url = parseUrl(rawUrl);
   if (html.length > MAX_HTML_BYTES) {
-    throw new ExtractError("That page is too large to parse");
+    throw new ExtractError("That paste is too large to save");
   }
-  return parseReadable(html, url.href, url.href);
+
+  const content = sanitizeContent(html, url.href, { discardChrome: true });
+  const wordCount = countWords(content);
+  if (wordCount === 0) {
+    throw new ExtractError("That paste didn't contain any readable text");
+  }
+
+  const { document } = parseHTML(`<article>${content}</article>`);
+  const heading = document.querySelector("h1, h2")?.textContent?.trim();
+
+  return {
+    url: url.href,
+    title: heading?.slice(0, 160) || url.hostname.replace(/^www\./, ""),
+    byline: null,
+    siteName: null,
+    excerpt: null,
+    content,
+    wordCount,
+  };
 }
 
 export async function extract(
   rawUrl: string,
-  source: ExtractSource
+  source: ExtractSource,
+  pastedHtml?: string
 ): Promise<ExtractedArticle> {
+  if (source === "paste") {
+    if (!pastedHtml?.trim()) throw new ExtractError("Nothing was pasted");
+    return extractPasted(pastedHtml, rawUrl);
+  }
+
   const url = normalizeUrl(rawUrl);
 
   if (source === "archive") {
@@ -320,10 +343,6 @@ export async function extract(
       `https://archive.ph/newest/${url.href}`
     );
     return parseReadable(html, finalUrl, url.href);
-  }
-
-  if (source === "render") {
-    return extractRendered(url);
   }
 
   if (TWEET_PATTERN.test(url.href)) {
