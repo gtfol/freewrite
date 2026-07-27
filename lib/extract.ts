@@ -355,36 +355,69 @@ function gistBlocks(payload: unknown, gistUrl: string): string | null {
   return joined && joined.length <= MAX_GIST_CHARS ? joined : null;
 }
 
-async function resolveMediumEmbed(src: string): Promise<string> {
-  const link = (href: string, label: string) =>
-    `<p><a href="${href}">${escapeText(label)}</a></p>`;
+const embedLink = (href: string, label: string) =>
+  `<p><a href="${href}">${escapeText(label)}</a></p>`;
+
+// Pinned to gist.github.com regardless of where the reference came from.
+async function inlineGist(rawGistUrl: string, file: string | null): Promise<string> {
+  const gistUrl = `https://gist.github.com${new URL(rawGistUrl).pathname.replace(/\.js$/, "")}`;
+  const json = await fetchEmbedText(
+    `${gistUrl}.json${file ? `?file=${encodeURIComponent(file)}` : ""}`
+  );
+  if (json) {
+    try {
+      const blocks = gistBlocks(JSON.parse(json), gistUrl);
+      if (blocks) return blocks;
+    } catch {
+      // fall through to the gist link
+    }
+  }
+  return embedLink(gistUrl, "View code on GitHub Gist");
+}
+
+// Medium's SSR ships the post's Apollo state inline, and its MediaResource
+// entries map each media id to the embed's real href (with /-escaped
+// slashes). Reading it out of the HTML already in hand beats fetching
+// medium.com/media pages — those stay as the fallback.
+function mediaHrefsFromState(html: string): Map<string, string> {
+  const map = new Map<string, string>();
+  const entries = html.matchAll(/"MediaResource:([A-Za-z0-9_-]+)"\s*:\s*\{([^{}]*)\}/g);
+  for (const [, id, body] of entries) {
+    const href = body.match(/"href"\s*:\s*"((?:[^"\\]|\\.)*)"/)?.[1];
+    if (!href) continue;
+    try {
+      const decoded = JSON.parse(`"${href}"`) as string;
+      if (/^https:\/\//.test(decoded)) map.set(id, decoded);
+    } catch {
+      // skip undecodable entries
+    }
+  }
+  return map;
+}
+
+async function resolveMediumEmbed(
+  src: string,
+  stateHref: string | undefined
+): Promise<string> {
+  if (stateHref) {
+    const url = new URL(stateHref);
+    if (url.hostname === "gist.github.com" && url.pathname.length > 1) {
+      return inlineGist(stateHref, null);
+    }
+    return embedLink(stateHref, "View embedded content");
+  }
 
   const page = await fetchEmbedText(src);
   if (page) {
     const gistMatch = page.match(GIST_SCRIPT);
     if (gistMatch) {
-      // Rebuilding from the origin + pathname keeps the fetch pinned to
-      // gist.github.com no matter what the media page contained.
       const jsUrl = new URL(gistMatch[0]);
-      const file = jsUrl.searchParams.get("file");
-      const gistUrl = `https://gist.github.com${jsUrl.pathname.replace(/\.js$/, "")}`;
-      const json = await fetchEmbedText(
-        `${gistUrl}.json${file ? `?file=${encodeURIComponent(file)}` : ""}`
-      );
-      if (json) {
-        try {
-          const blocks = gistBlocks(JSON.parse(json), gistUrl);
-          if (blocks) return blocks;
-        } catch {
-          // fall through to the gist link
-        }
-      }
-      return link(gistUrl, "View code on GitHub Gist");
+      return inlineGist(gistMatch[0], jsUrl.searchParams.get("file"));
     }
     const inner = page.match(/<iframe[^>]+src="(https:\/\/[^"]+)"/i);
-    if (inner) return link(inner[1], "View embedded content");
+    if (inner) return embedLink(inner[1], "View embedded content");
   }
-  return link(src, "View embedded content");
+  return embedLink(src, "View embedded content");
 }
 
 async function hydrateMediumEmbeds(html: string): Promise<string> {
@@ -395,11 +428,13 @@ async function hydrateMediumEmbeds(html: string): Promise<string> {
       .filter((f) => MEDIA_SRC.test(f.getAttribute("src") ?? ""))
       .slice(0, MEDIA_EMBED_LIMIT);
     if (frames.length === 0) return html;
+    const stateHrefs = mediaHrefsFromState(html);
     await Promise.all(
       frames.map(async (frame) => {
         const src = new URL(frame.getAttribute("src")!, "https://medium.com").href;
+        const mediaId = new URL(src).pathname.split("/")[2] ?? "";
         const holder = document.createElement("div");
-        holder.innerHTML = await resolveMediumEmbed(src);
+        holder.innerHTML = await resolveMediumEmbed(src, stateHrefs.get(mediaId));
         frame.replaceWith(...Array.from(holder.childNodes));
       })
     );
