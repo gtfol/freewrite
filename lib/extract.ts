@@ -459,43 +459,92 @@ async function hydrateMediumEmbeds(html: string): Promise<string> {
   }
 }
 
-async function extractViaFreedium(url: URL): Promise<ExtractedArticle> {
-  const base = process.env.FREEDIUM_BASE_URL ?? "https://freedium.cfd";
-  try {
-    const { html, finalUrl } = await fetchHtml(`${base}/${url.href}`);
-    const article = parseReadable(
-      await hydrateMediumEmbeds(html),
-      finalUrl,
-      url.href
-    );
-    // Freedium's own error pages parse but come out short; a story that
-    // made it through is never this thin.
-    if (article.wordCount >= 150) {
-      return { ...article, siteName: "Medium", via: "freedium" };
-    }
-  } catch {
-    // fall through — a truncated preview is worse than an honest error
+// Anything shorter than this is a challenge page, an error page, or a
+// truncated preview — never a story that actually came through.
+const MEDIUM_MIN_WORDS = 150;
+
+const freediumUrl = (url: URL) =>
+  `${process.env.FREEDIUM_BASE_URL ?? "https://freedium.cfd"}/${url.href}`;
+
+function assertFullStory(article: ExtractedArticle): ExtractedArticle {
+  if (article.wordCount < MEDIUM_MIN_WORDS) {
+    throw new ExtractError(`only ${article.wordCount} words came back`);
   }
-  throw new ExtractError(
-    "Medium wouldn't hand this story to the server — it's member-only or behind Medium's bot wall — and the freedium mirror couldn't fetch it either. If you can read it in your browser, copy the story and paste it in."
+  return article;
+}
+
+const asMedium = (article: ExtractedArticle): ExtractedArticle => ({
+  ...article,
+  siteName: "Medium",
+  via: "freedium",
+});
+
+// Stage 1 — the mirror, fetched server-side. Cheapest path that yields real
+// HTML, so gist embeds can be hydrated into code blocks.
+async function mediumFromMirror(url: URL): Promise<ExtractedArticle> {
+  const { html, finalUrl } = await fetchHtml(freediumUrl(url));
+  return asMedium(
+    assertFullStory(
+      parseReadable(await hydrateMediumEmbeds(html), finalUrl, url.href)
+    )
   );
 }
 
-// medium.com URLs get their own flow: the direct fetch is still tried first
-// (some deployments pass the wall, and public stories parse best from the
-// source), but any refusal — 403 from the bot wall, timeouts, non-HTML
-// interstitials — falls back to the mirror instead of surfacing an error.
-async function extractMedium(url: URL): Promise<ExtractedArticle> {
-  let html: string;
-  let finalUrl: string;
-  try {
-    ({ html, finalUrl } = await fetchHtml(url.href));
-  } catch (error) {
-    if (!(error instanceof ExtractError)) throw error;
-    return extractViaFreedium(url);
+// Stage 2 — the mirror through the rendering service. The mirror sits
+// behind its own bot protection, which turns away datacenter IPs exactly
+// like Medium does; the render service is a real browser on someone else's
+// network, so it gets through where a plain server fetch can't. Markdown
+// comes back, so embedded code arrives as fenced blocks rather than
+// hydrated gists.
+async function mediumFromRenderedMirror(url: URL): Promise<ExtractedArticle> {
+  return asMedium(
+    assertFullStory(
+      await extractRendered(new URL(freediumUrl(url)), {
+        canonicalUrl: url.href,
+        timeoutMs: 30_000,
+      })
+    )
+  );
+}
+
+// Stage 3 — medium.com itself. Last, not first: Medium fingerprints TLS, so
+// hosted deployments are refused outright and only a self-hosted reader on
+// a residential network tends to get through. Kept because when it does
+// work it's the highest-fidelity copy.
+async function mediumDirect(url: URL): Promise<ExtractedArticle> {
+  const { html, finalUrl } = await fetchHtml(url.href);
+  if (isLockedMediumPost(html)) {
+    throw new ExtractError("the story is member-only");
   }
-  if (isLockedMediumPost(html)) return extractViaFreedium(url);
-  return parseReadable(await hydrateMediumEmbeds(html), finalUrl, url.href);
+  return assertFullStory(
+    parseReadable(await hydrateMediumEmbeds(html), finalUrl, url.href)
+  );
+}
+
+// Each stage's failure is carried into the error message: when every route
+// is blocked, the reader says which one failed how instead of a shrug.
+async function extractMedium(url: URL): Promise<ExtractedArticle> {
+  const stages: [string, () => Promise<ExtractedArticle>][] = [
+    ["the freedium mirror", () => mediumFromMirror(url)],
+    ["the mirror via the rendering service", () => mediumFromRenderedMirror(url)],
+    ["medium.com directly", () => mediumDirect(url)],
+  ];
+
+  const failures: string[] = [];
+  for (const [label, run] of stages) {
+    try {
+      return await run();
+    } catch (error) {
+      if (!(error instanceof ExtractError)) throw error;
+      const reason = error.message.replace(/^[A-Z]/, (c) => c.toLowerCase());
+      failures.push(`${label} — ${reason}`);
+    }
+  }
+
+  throw new ExtractError(
+    `Couldn't get this Medium story. Tried ${failures.join("; ")}. ` +
+      "Open it in your browser, copy everything, and paste it in."
+  );
 }
 
 const ARXIV_PATTERN =
@@ -647,11 +696,16 @@ function extractFromMarkdown(
 }
 
 // Rendered copy via r.jina.ai: a real browser fetch on their side, markdown
-// back on ours. Covers PDFs and JS-rendered pages; bot-walled hosts (e.g.
-// Cloudflare-challenged ones) still fail here — that's what paste is for.
+// back on ours. Covers PDFs, JS-rendered pages, and hosts that refuse
+// datacenter traffic — the request leaves from the service's network, not
+// ours. `canonicalUrl` keeps the saved article pointing at the original
+// when what's rendered is a mirror of it.
 // JINA_API_KEY (optional) raises the service's rate limits; JINA_BASE_URL
 // overrides the endpoint for tests or self-hosted readers.
-async function extractRendered(url: URL): Promise<ExtractedArticle> {
+async function extractRendered(
+  url: URL,
+  { canonicalUrl = url.href, timeoutMs = 50_000 } = {}
+): Promise<ExtractedArticle> {
   const base = process.env.JINA_BASE_URL ?? "https://r.jina.ai";
   const headers: Record<string, string> = { accept: "application/json" };
   if (process.env.JINA_API_KEY) {
@@ -662,7 +716,7 @@ async function extractRendered(url: URL): Promise<ExtractedArticle> {
   try {
     res = await fetch(`${base}/${url.href}`, {
       headers,
-      signal: AbortSignal.timeout(50_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     throw new ExtractError("The rendering service didn't respond in time");
@@ -687,7 +741,7 @@ async function extractRendered(url: URL): Promise<ExtractedArticle> {
     throw new ExtractError("That page is too large to parse");
   }
 
-  return extractFromMarkdown(md, url.href, url.href, {
+  return extractFromMarkdown(md, url.href, canonicalUrl, {
     title: body?.data?.title,
     excerpt: body?.data?.description,
   });
@@ -838,8 +892,10 @@ export async function extract(
     contentType.includes("application/xhtml")
   ) {
     const html = await readBody(res);
+    // A Medium-powered publication on its own domain: served to us, but
+    // truncated. The mirror chain reads those by URL just the same.
     if (isLockedMediumPost(html)) {
-      return extractViaFreedium(url);
+      return extractMedium(url);
     }
     if (MEDIUM_MARKERS.test(html)) {
       return parseReadable(await hydrateMediumEmbeds(html), finalUrl, url.href);
