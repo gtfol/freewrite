@@ -1,3 +1,4 @@
+import { htmlToMarkdown } from "@/lib/markdown";
 import type {
   Article,
   ArticleVia,
@@ -55,6 +56,10 @@ function htmlText(html: string): string {
 
 export function articleText(article: Article): string {
   return htmlText(article.content);
+}
+
+export function articleMarkdown(article: Article): string {
+  return htmlToMarkdown(article.content);
 }
 
 export function htmlWordCount(html: string): number {

@@ -11,7 +11,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useFullscreen } from "@/hooks/use-fullscreen";
-import { articleText } from "@/lib/articles";
+import { articleMarkdown } from "@/lib/articles";
 import {
   articleChatUrl,
   articlePromptFull,
@@ -46,7 +46,7 @@ function ArticleChatPopover({ article }: { article: Article }) {
     title: article.title,
     byline: article.byline,
     url: article.url,
-    text: articleText(article),
+    text: articleMarkdown(article),
   };
 
   const open = (provider: ChatProvider) => {
