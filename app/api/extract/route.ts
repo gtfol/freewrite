@@ -6,7 +6,7 @@ import type { ExtractSource } from "@/lib/types";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const SOURCES: ExtractSource[] = ["direct", "archive", "paste"];
+const SOURCES: ExtractSource[] = ["direct", "render", "paste"];
 
 export async function POST(request: Request) {
   let body: { url?: unknown; source?: unknown; html?: unknown; text?: unknown };

@@ -55,7 +55,7 @@ const retryClass =
 
 const LOADING_LABELS: Record<ExtractSource, string> = {
   direct: "Saving…",
-  archive: "Checking archive…",
+  render: "Rendering…",
   paste: "Saving…",
 };
 
@@ -70,14 +70,14 @@ function RetryButtons({
 }) {
   return (
     <>
+      {!tried.includes("render") && (
+        <button className={retryClass} onClick={() => onRetry("render")}>
+          Try the rendered copy
+        </button>
+      )}
       <button className={retryClass} onClick={onPaste}>
         Paste the text yourself
       </button>
-      {!tried.includes("archive") && (
-        <button className={retryClass} onClick={() => onRetry("archive")}>
-          Try the archive.ph copy
-        </button>
-      )}
     </>
   );
 }
@@ -167,7 +167,7 @@ export default function ReadPage() {
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Paste a link — an article, a twitter post, an arXiv paper"
+            placeholder="Paste a link — an article, a twitter post, a pdf, an arXiv paper"
             className="h-10 border-0 border-b border-border rounded-none px-0 shadow-none focus-visible:ring-0 focus-visible:border-foreground/40"
             disabled={state.kind === "loading"}
           />

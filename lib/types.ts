@@ -6,10 +6,10 @@ export interface Entry {
   deletedAt?: number | null;
 }
 
-export type ExtractSource = "direct" | "archive" | "paste";
+export type ExtractSource = "direct" | "render" | "paste";
 
-// "render" only survives as a label for articles saved while the
-// r.jina.ai fallback existed.
+// "archive" only survives as a label for articles saved while the
+// archive.ph fallback existed.
 export type ArticleVia = "archive" | "render" | "paste" | null;
 
 export interface Article {
