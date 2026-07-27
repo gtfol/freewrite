@@ -100,7 +100,9 @@ export default function ReadPage() {
   }, []);
 
   const save = async (data: ExtractedArticle, source: ExtractSource) => {
-    const article = toArticle(data, sourceToVia(source));
+    // The server may have taken a detour (e.g. freedium for locked Medium
+    // stories); its label wins over the source the client asked for.
+    const article = toArticle(data, data.via ?? sourceToVia(source));
     await putArticle(article);
     setArticles((prev) => [article, ...(prev ?? [])]);
     setInput("");

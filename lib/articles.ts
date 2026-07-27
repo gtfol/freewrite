@@ -36,6 +36,7 @@ export function viaLabel(via: ArticleVia): string | null {
   if (via === "archive") return "via archive.ph";
   if (via === "render") return "via r.jina.ai";
   if (via === "paste") return "pasted";
+  if (via === "freedium") return "via freedium";
   return null;
 }
 

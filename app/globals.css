@@ -23,6 +23,9 @@
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
+  --highlight: oklch(0.94 0.07 152);
+  --highlight-hover: oklch(0.89 0.1 152);
+  --highlight-accent: oklch(0.55 0.14 152);
 }
 
 .dark {
@@ -44,6 +47,9 @@
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 16%);
   --ring: oklch(0.556 0 0);
+  --highlight: oklch(0.45 0.09 152 / 45%);
+  --highlight-hover: oklch(0.5 0.1 152 / 60%);
+  --highlight-accent: oklch(0.72 0.12 152);
 }
 
 @theme inline {
@@ -179,5 +185,33 @@
     border: 1px solid var(--color-border);
     padding: 0.5em 0.75em;
     text-align: left;
+  }
+
+  /* Reader annotations (Medium-style): quote marks + note chips are painted
+     into the article DOM by the highlight layer, so they're styled here
+     rather than with utility classes. */
+  & mark[data-hl] {
+    background: var(--highlight);
+    color: inherit;
+    cursor: pointer;
+    transition: background-color 150ms;
+  }
+  & mark[data-hl]:hover {
+    background: var(--highlight-hover);
+  }
+  & [data-hl-chip] {
+    display: inline-flex;
+    vertical-align: super;
+    margin-left: 0.15em;
+    color: var(--highlight-accent);
+    cursor: pointer;
+    transition: opacity 150ms;
+  }
+  & [data-hl-chip]:hover {
+    opacity: 0.7;
+  }
+  & [data-hl-chip] svg {
+    width: 0.75em;
+    height: 0.75em;
   }
 }

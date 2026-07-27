@@ -18,21 +18,27 @@ export function entryHash(e: Entry): Promise<string> {
 }
 
 export function articleHash(a: Article): Promise<string> {
-  return sha256Hex(
-    JSON.stringify([
-      a.url,
-      a.title,
-      a.byline,
-      a.siteName,
-      a.excerpt,
-      a.content,
-      a.contentOriginal ?? null,
-      a.wordCount,
-      a.readAt ? 1 : 0,
-      a.via,
-      a.deletedAt ? 1 : 0,
-    ])
-  );
+  const fields: unknown[] = [
+    a.url,
+    a.title,
+    a.byline,
+    a.siteName,
+    a.excerpt,
+    a.content,
+    a.contentOriginal ?? null,
+    a.wordCount,
+    a.readAt ? 1 : 0,
+    a.via,
+    a.deletedAt ? 1 : 0,
+  ];
+  // Appended only when highlights exist, so shipping the feature doesn't
+  // change the hash of — and re-push — every already-synced article.
+  if (a.highlights?.length) {
+    fields.push(
+      a.highlights.map((h) => [h.id, h.text, h.prefix, h.suffix, h.note])
+    );
+  }
+  return sha256Hex(JSON.stringify(fields));
 }
 
 export function rootDigest(

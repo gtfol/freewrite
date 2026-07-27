@@ -285,6 +285,38 @@ async function extractTweet(url: URL): Promise<ExtractedArticle> {
   };
 }
 
+// Medium serves member-only stories truncated to logged-out readers — the
+// locked portion never reaches the HTML, so neither Readability nor a
+// rendering browser (nor a browser's reader mode) can see it. Freedium, a
+// community mirror, can fetch the full story; locked posts are routed
+// through it while keeping the canonical Medium URL. Detection works off
+// page markers rather than hostnames so custom-domain publications count.
+// FREEDIUM_BASE_URL overrides the mirror for tests or when the domain moves.
+const MEDIUM_MARKERS = /com\.medium\.reader|cdn-client\.medium\.com/;
+const MEDIUM_LOCKED = /"isAccessibleForFree"\s*:\s*false|"locked"\s*:\s*true/;
+
+function isLockedMediumPost(html: string): boolean {
+  return MEDIUM_MARKERS.test(html) && MEDIUM_LOCKED.test(html);
+}
+
+async function extractLockedMedium(url: URL): Promise<ExtractedArticle> {
+  const base = process.env.FREEDIUM_BASE_URL ?? "https://freedium.cfd";
+  try {
+    const { html, finalUrl } = await fetchHtml(`${base}/${url.href}`);
+    const article = parseReadable(html, finalUrl, url.href);
+    // Freedium's own error pages parse but come out short; a locked story
+    // that made it through is never this thin.
+    if (article.wordCount >= 150) {
+      return { ...article, siteName: "Medium", via: "freedium" };
+    }
+  } catch {
+    // fall through — a truncated preview is worse than an honest error
+  }
+  throw new ExtractError(
+    "That's a member-only Medium story and the freedium mirror couldn't fetch it. If you can read it in your browser, copy the story and paste it in."
+  );
+}
+
 const ARXIV_PATTERN =
   /arxiv\.org\/(?:abs|pdf|html)\/([0-9]{4}\.[0-9]{4,5}(?:v\d+)?|[a-z-]+(?:\.[A-Z]{2})?\/[0-9]{7})/i;
 
@@ -620,7 +652,11 @@ export async function extract(
     contentType.includes("text/html") ||
     contentType.includes("application/xhtml")
   ) {
-    return parseReadable(await readBody(res), finalUrl, url.href);
+    const html = await readBody(res);
+    if (isLockedMediumPost(html)) {
+      return extractLockedMedium(url);
+    }
+    return parseReadable(html, finalUrl, url.href);
   }
 
   throw new ExtractError(

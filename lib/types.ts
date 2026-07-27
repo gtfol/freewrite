@@ -9,8 +9,22 @@ export interface Entry {
 export type ExtractSource = "direct" | "render" | "paste";
 
 // "archive" only survives as a label for articles saved while the
-// archive.ph fallback existed.
-export type ArticleVia = "archive" | "render" | "paste" | null;
+// archive.ph fallback existed. "freedium" marks member-only Medium stories
+// fetched through the freedium mirror.
+export type ArticleVia = "archive" | "render" | "paste" | "freedium" | null;
+
+// A reader annotation: the exact quoted text plus a little surrounding
+// context (a text-quote anchor, re-anchored against the rendered article at
+// view time) and an optional attached comment.
+export interface Highlight {
+  id: string;
+  text: string;
+  prefix: string;
+  suffix: string;
+  note: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
 
 export interface Article {
   id: string;
@@ -26,6 +40,8 @@ export interface Article {
   via: ArticleVia;
   // Set on first trim; content as it was before any blocks were removed.
   contentOriginal?: string;
+  // Absent when the article has no annotations — never an empty array.
+  highlights?: Highlight[];
   updatedAt: number;
   deletedAt?: number | null;
 }
@@ -85,4 +101,7 @@ export interface ExtractedArticle {
   excerpt: string | null;
   content: string;
   wordCount: number;
+  // Set when the server took a detour the client didn't ask for (e.g. a
+  // locked Medium story served through freedium); wins over the source label.
+  via?: ArticleVia;
 }

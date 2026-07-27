@@ -84,8 +84,8 @@ export async function POST(request: Request) {
   const articles = articleIds.length
     ? await pool.query(
         `select id, url, title, byline, site_name, excerpt, content,
-           content_original, word_count, saved_at, read_at, via, updated_at,
-           deleted_at, seq, hash
+           content_original, word_count, saved_at, read_at, via, highlights,
+           updated_at, deleted_at, seq, hash
          from articles where user_id = $1 and id = any($2)`,
         [uid, articleIds]
       )
@@ -115,6 +115,7 @@ export async function POST(request: Request) {
         ...(r.content_original !== null && {
           contentOriginal: r.content_original,
         }),
+        ...(r.highlights?.length && { highlights: r.highlights }),
         wordCount: r.word_count,
         savedAt: Number(r.saved_at),
         readAt: r.read_at === null ? null : Number(r.read_at),
