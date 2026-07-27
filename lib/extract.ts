@@ -236,7 +236,7 @@ async function extractTweet(url: URL): Promise<ExtractedArticle> {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
   } catch {
-    throw new ExtractError("Couldn't reach X");
+    throw new ExtractError("Couldn't reach Twitter");
   }
   if (!res.ok) {
     throw new ExtractError("Couldn't load that post — it may be private or deleted");
@@ -265,9 +265,9 @@ async function extractTweet(url: URL): Promise<ExtractedArticle> {
 
   return {
     url: oembed.url ?? canonical,
-    title: author ? `${author} on X` : "Post on X",
+    title: author ? `${author} on Twitter` : "Post on Twitter",
     byline: author,
-    siteName: "X",
+    siteName: "Twitter",
     excerpt: null,
     content,
     wordCount: countWords(content),

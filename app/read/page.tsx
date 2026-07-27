@@ -163,7 +163,7 @@ export default function ReadPage() {
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Paste a link — an article, an x.com post, an arXiv paper"
+            placeholder="Paste a link — an article, a twitter post, an arXiv paper"
             className="h-10 border-0 border-b border-border rounded-none px-0 shadow-none focus-visible:ring-0 focus-visible:border-foreground/40"
             disabled={state.kind === "loading"}
           />
