@@ -103,26 +103,20 @@ export function splitBlocks(html: string): string[] {
   return blocks;
 }
 
-export function plainTextToHtml(text: string): string {
-  const escape = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return text
-    .split(/\n{2,}/)
-    .map((block) => block.trim())
-    .filter(Boolean)
-    .map((block) => `<p>${escape(block).replace(/\n/g, "<br>")}</p>`)
-    .join("");
+export interface PastedClipboard {
+  html?: string;
+  text?: string;
 }
 
 export async function requestExtract(
   url: string,
   source: ExtractSource,
-  html?: string
+  paste?: PastedClipboard
 ): Promise<ExtractedArticle> {
   const res = await fetch("/api/extract", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ url, source, html }),
+    body: JSON.stringify({ url, source, ...paste }),
   });
   const body = await res.json().catch(() => null);
   if (!res.ok) {
