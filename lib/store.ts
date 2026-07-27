@@ -19,9 +19,11 @@ interface PrefsState {
   fontId: string;
   fontSize: number;
   backspaceDisabled: boolean;
+  markdownPreview: boolean;
   setFont: (fontId: string) => void;
   cycleFontSize: () => void;
   toggleBackspace: () => void;
+  toggleMarkdownPreview: () => void;
 }
 
 export const usePrefs = create<PrefsState>()(
@@ -30,10 +32,13 @@ export const usePrefs = create<PrefsState>()(
       fontId: DEFAULT_FONT_ID,
       fontSize: DEFAULT_FONT_SIZE,
       backspaceDisabled: false,
+      markdownPreview: false,
       setFont: (fontId) => set({ fontId }),
       cycleFontSize: () => set((s) => ({ fontSize: nextFontSize(s.fontSize) })),
       toggleBackspace: () =>
         set((s) => ({ backspaceDisabled: !s.backspaceDisabled })),
+      toggleMarkdownPreview: () =>
+        set((s) => ({ markdownPreview: !s.markdownPreview })),
     }),
     { name: "freewrite:prefs" }
   )

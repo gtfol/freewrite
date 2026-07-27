@@ -40,9 +40,11 @@ export function BottomNav() {
   const fontId = usePrefs((s) => s.fontId);
   const fontSize = usePrefs((s) => s.fontSize);
   const backspaceDisabled = usePrefs((s) => s.backspaceDisabled);
+  const markdownPreview = usePrefs((s) => s.markdownPreview);
   const setFont = usePrefs((s) => s.setFont);
   const cycleFontSize = usePrefs((s) => s.cycleFontSize);
   const toggleBackspace = usePrefs((s) => s.toggleBackspace);
+  const toggleMarkdownPreview = usePrefs((s) => s.toggleMarkdownPreview);
 
   const running = useTimer((s) => s.running);
   const addEntry = useWriter((s) => s.addEntry);
@@ -114,6 +116,14 @@ export function BottomNav() {
             className={cn(backspaceDisabled && "line-through")}
           >
             Backspace
+          </NavButton>
+          <Dot />
+          <NavButton
+            active={markdownPreview}
+            onClick={toggleMarkdownPreview}
+            title="Side-by-side markdown preview"
+          >
+            Markdown
           </NavButton>
           <Dot />
           {fullscreen.supported && (
