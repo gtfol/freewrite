@@ -17,6 +17,15 @@ function inline(node: Node): string {
   const inner = Array.from(el.childNodes).map(inline).join("");
 
   switch (el.tagName) {
+    case "SPAN": {
+      const cls = el.getAttribute("class") ?? "";
+      if (/\bmath\b/.test(cls)) {
+        const tex = (el.textContent ?? "").trim();
+        if (!tex) return "";
+        return /\bmath-display\b/.test(cls) ? `\n\n$$\n${tex}\n$$\n\n` : `$${tex}$`;
+      }
+      return inner;
+    }
     case "A": {
       const href = el.getAttribute("href");
       const label = inner.trim();
