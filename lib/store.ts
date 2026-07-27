@@ -12,6 +12,7 @@ import {
   WELCOME_CONTENT,
 } from "@/lib/entries";
 import { DEFAULT_FONT_ID, DEFAULT_FONT_SIZE, nextFontSize } from "@/lib/fonts";
+import { clearShareRecord, getShareRecord } from "@/lib/shares";
 import type { Entry } from "@/lib/types";
 
 interface PrefsState {
@@ -235,6 +236,16 @@ export const useWriter = create<WriterState>()((set, get) => ({
     if (pendingSave?.id === id) {
       pendingSave = null;
       if (saveTimeout) clearTimeout(saveTimeout);
+    }
+    // Deleting an entry unpublishes it too — best effort; worst case the
+    // public snapshot just lives out its TTL.
+    const share = getShareRecord(id);
+    if (share) {
+      void fetch(`/api/share/entry/${share.id}`, {
+        method: "DELETE",
+        headers: { "x-share-token": share.token },
+      }).catch(() => {});
+      clearShareRecord(id);
     }
     await deleteEntry(id);
     const entries = get().entries.filter((e) => e.id !== id);

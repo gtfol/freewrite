@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { allowShare, putShare, shareEnabled } from "@/lib/share";
+import {
+  allowShare,
+  entryShareTtlSeconds,
+  putShare,
+  shareEnabled,
+} from "@/lib/share";
 
 export const runtime = "nodejs";
 
@@ -8,7 +13,10 @@ const MAX_TEXT_CHARS = 600_000;
 const MAX_META_CHARS = 500;
 
 export async function GET() {
-  return NextResponse.json({ enabled: shareEnabled() });
+  return NextResponse.json({
+    enabled: shareEnabled(),
+    entryTtlSeconds: entryShareTtlSeconds(),
+  });
 }
 
 export async function POST(request: Request) {

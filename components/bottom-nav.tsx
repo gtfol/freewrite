@@ -6,6 +6,7 @@ import { Clock, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { ChatPopover } from "@/components/chat-popover";
+import { SharePopover } from "@/components/share-popover";
 import { SyncPopover } from "@/components/sync-popover";
 import { TimerButton } from "@/components/timer-button";
 import { useFullscreen } from "@/hooks/use-fullscreen";
@@ -92,6 +93,8 @@ export function BottomNav() {
           <TimerButton />
           <Dot />
           <ChatPopover />
+          <Dot />
+          <SharePopover />
           <Dot />
           <Link
             href="/read"
