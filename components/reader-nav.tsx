@@ -105,13 +105,17 @@ function ArticleChatPopover({ article }: { article: Article }) {
             Claude
           </button>
           {linkOnly && shareReady === true && (
-            <p className="px-3 py-2 text-xs text-muted-foreground">
-              The article is too long to send directly, so those open with a
-              temporary share link that expires on its own.
-            </p>
+            <>
+              <div className="my-1 h-px bg-border" />
+              <p className="px-3 py-2 text-xs text-muted-foreground">
+                The article is too long to send directly, so those open with a
+                temporary share link that expires on its own.
+              </p>
+            </>
           )}
           {linkOnly && shareReady !== true && (
             <>
+              <div className="my-1 h-px bg-border" />
               <p className="px-3 py-2 text-xs text-muted-foreground">
                 The article is too long to send as a link, so those open with
                 the title + URL. To paste the full text instead:
