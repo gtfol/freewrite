@@ -5,6 +5,12 @@ export interface Entry {
   content: string;
 }
 
+export type ExtractSource = "direct" | "archive" | "paste";
+
+// "render" only survives as a label for articles saved while the
+// r.jina.ai fallback existed.
+export type ArticleVia = "archive" | "render" | "paste" | null;
+
 export interface Article {
   id: string;
   url: string;
@@ -16,7 +22,9 @@ export interface Article {
   wordCount: number;
   savedAt: number;
   readAt: number | null;
-  via: "archive" | null;
+  via: ArticleVia;
+  // Set on first trim; content as it was before any blocks were removed.
+  contentOriginal?: string;
 }
 
 export interface ExtractedArticle {

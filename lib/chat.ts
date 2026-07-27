@@ -26,7 +26,16 @@ Start with 'hey, thanks for showing me this. my thoughts:' and then use markdown
 
 Here's my journal entry:`;
 
+export const READER_PROMPT = `below is an article i just read. talk through it with me like a sharp friend who read it too. what's the core argument? what's genuinely new vs repackaged? where would you push back? connect it to adjacent ideas i should know about. don't summarize section by section — synthesize. keep it casual, dont say yo. format with markdown headings if needed.
+
+the article:`;
+
 export type ChatProvider = "chatgpt" | "claude";
+
+export function linkoutUrl(provider: ChatProvider, promptText: string): string {
+  const base = provider === "chatgpt" ? GPT_BASE : CLAUDE_BASE;
+  return base + encodeURIComponent(promptText);
+}
 
 export function fullPrompt(provider: ChatProvider, entryText: string): string {
   const prompt = provider === "chatgpt" ? GPT_PROMPT : CLAUDE_PROMPT;
@@ -34,8 +43,7 @@ export function fullPrompt(provider: ChatProvider, entryText: string): string {
 }
 
 export function chatUrl(provider: ChatProvider, entryText: string): string {
-  const base = provider === "chatgpt" ? GPT_BASE : CLAUDE_BASE;
-  return base + encodeURIComponent(fullPrompt(provider, entryText));
+  return linkoutUrl(provider, fullPrompt(provider, entryText));
 }
 
 export function isUrlTooLong(entryText: string): boolean {
@@ -43,4 +51,46 @@ export function isUrlTooLong(entryText: string): boolean {
     chatUrl("chatgpt", entryText).length > MAX_URL_LENGTH ||
     chatUrl("claude", entryText).length > MAX_URL_LENGTH
   );
+}
+
+interface ArticleSource {
+  title: string;
+  byline: string | null;
+  url: string;
+  text: string;
+}
+
+function articleHeader(article: ArticleSource): string {
+  const by = article.byline ? ` — by ${article.byline}` : "";
+  return `"${article.title}"${by}\n${article.url}`;
+}
+
+export function articlePromptFull(article: ArticleSource): string {
+  return `${READER_PROMPT}\n\n${articleHeader(article)}\n\n${article.text}`;
+}
+
+export function articlePromptLink(article: ArticleSource): string {
+  return `${READER_PROMPT}\n\n${articleHeader(article)}\n\n(full text is at the link — read it first.)`;
+}
+
+export function articlePromptShared(
+  article: ArticleSource,
+  shareUrl: string,
+  ttlMinutes: number
+): string {
+  return `${READER_PROMPT}\n\n${articleHeader(article)}\n\nread the full text here first: ${shareUrl}\n(that's a temporary snapshot of my saved copy — it expires in about ${ttlMinutes} minutes. the url above it is the original source, for reference only.)`;
+}
+
+export function articleChatUrl(
+  provider: ChatProvider,
+  article: ArticleSource
+): { url: string; carriesFullText: boolean } {
+  const full = linkoutUrl(provider, articlePromptFull(article));
+  if (full.length <= MAX_URL_LENGTH) {
+    return { url: full, carriesFullText: true };
+  }
+  return {
+    url: linkoutUrl(provider, articlePromptLink(article)),
+    carriesFullText: false,
+  };
 }

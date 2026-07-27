@@ -4,12 +4,34 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
 
-import { articleSite, readingTime } from "@/lib/articles";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ReaderNav } from "@/components/reader-nav";
+import {
+  articleSite,
+  htmlWordCount,
+  readingTime,
+  splitBlocks,
+  viaLabel,
+} from "@/lib/articles";
 import { deleteArticle, getArticle, putArticle } from "@/lib/db";
 import type { Article } from "@/lib/types";
 
-const actionClass =
-  "text-[13px] text-muted-foreground transition-colors hover:text-foreground";
+interface TrimSession {
+  blocks: string[];
+  undo: string[][];
+  // The session's starting blocks, joined — stored as contentOriginal on the
+  // first trim so a later Restore round-trips to byte-identical content.
+  original: string;
+}
 
 export default function ArticlePage({
   params,
@@ -19,6 +41,8 @@ export default function ArticlePage({
   const { id } = use(params);
   const router = useRouter();
   const [article, setArticle] = useState<Article | null | undefined>(undefined);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [trim, setTrim] = useState<TrimSession | null>(null);
 
   useEffect(() => {
     void getArticle(id).then((found) => {
@@ -38,7 +62,10 @@ export default function ArticlePage({
           <p className="text-sm text-muted-foreground">
             This article isn&apos;t saved in this browser.
           </p>
-          <Link href="/read" className={`${actionClass} mt-4 inline-block`}>
+          <Link
+            href="/read"
+            className="mt-4 inline-block text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+          >
             ← Read
           </Link>
         </div>
@@ -50,23 +77,80 @@ export default function ArticlePage({
     article.byline,
     articleSite(article),
     readingTime(article.wordCount),
-    article.via === "archive" ? "via archive.ph" : null,
+    viaLabel(article.via),
   ]
     .filter(Boolean)
     .join(" · ");
 
+  const removeBlock = (index: number) => {
+    setTrim((session) =>
+      session
+        ? {
+            ...session,
+            blocks: session.blocks.filter((_, i) => i !== index),
+            undo: [...session.undo, session.blocks],
+          }
+        : session
+    );
+  };
+
+  const finishTrim = async () => {
+    if (!trim) return;
+    const content = trim.blocks.join("\n");
+    if (content !== article.content) {
+      const updated: Article = {
+        ...article,
+        content,
+        wordCount: htmlWordCount(content),
+        contentOriginal: article.contentOriginal ?? trim.original,
+      };
+      await putArticle(updated);
+      setArticle(updated);
+    }
+    setTrim(null);
+  };
+
+  const trimControls = {
+    active: trim !== null,
+    canUndo: (trim?.undo.length ?? 0) > 0,
+    canRestore:
+      !!article.contentOriginal && article.contentOriginal !== article.content,
+    onStart: () => {
+      const blocks = splitBlocks(article.content);
+      setTrim({ blocks, undo: [], original: blocks.join("\n") });
+    },
+    onDone: () => void finishTrim(),
+    onUndo: () =>
+      setTrim((session) =>
+        session && session.undo.length > 0
+          ? {
+              ...session,
+              blocks: session.undo[session.undo.length - 1],
+              undo: session.undo.slice(0, -1),
+            }
+          : session
+      ),
+    onRestore: () =>
+      setTrim((session) =>
+        session && article.contentOriginal
+          ? {
+              ...session,
+              blocks: splitBlocks(article.contentOriginal),
+              undo: [...session.undo, session.blocks],
+            }
+          : session
+      ),
+    onCancel: () => setTrim(null),
+  };
+
   return (
     <main className="min-h-dvh">
-      <div className="mx-auto max-w-[650px] px-6 pt-14 pb-28">
-        <div className="mb-12 flex items-baseline justify-between">
-          <Link href="/read" className={actionClass}>
-            ← Read
-          </Link>
-          <Link href="/" className={actionClass}>
-            Write
-          </Link>
-        </div>
-
+      <div className="mx-auto max-w-[650px] px-6 pt-14 pb-32">
+        {trim && (
+          <p className="mb-8 font-sans text-xs text-muted-foreground">
+            Trimming — click a block to remove it. Nothing is saved until Done.
+          </p>
+        )}
         <article style={{ fontFamily: "var(--font-crimson), Georgia, serif" }}>
           <h1 className="text-[1.75rem] leading-tight font-semibold">
             {article.title}
@@ -83,32 +167,62 @@ export default function ArticlePage({
               original
             </a>
           </p>
-          <div
-            className="reader mt-10"
-            dangerouslySetInnerHTML={{ __html: article.content }}
-          />
+          {trim ? (
+            <div className="reader mt-10 select-none">
+              {trim.blocks.map((block, i) => (
+                <div
+                  key={`${i}-${block.length}`}
+                  onClickCapture={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    removeBlock(i);
+                  }}
+                  title="Click to remove"
+                  className="-mx-2 cursor-pointer rounded-sm px-2 transition-colors hover:bg-destructive/10"
+                  dangerouslySetInnerHTML={{ __html: block }}
+                />
+              ))}
+              {trim.blocks.length === 0 && (
+                <p className="font-sans text-sm text-muted-foreground">
+                  Nothing left — Undo, or Cancel to keep the article as it was.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div
+              className="reader mt-10"
+              dangerouslySetInnerHTML={{ __html: article.content }}
+            />
+          )}
         </article>
-
-        <div className="mt-16 flex gap-4 border-t border-border/60 pt-6">
-          <a
-            href={article.url}
-            target="_blank"
-            rel="noreferrer noopener"
-            className={actionClass}
-          >
-            View original
-          </a>
-          <button
-            type="button"
-            className="text-[13px] text-muted-foreground transition-colors hover:text-destructive"
-            onClick={() => {
-              void deleteArticle(article.id).then(() => router.push("/read"));
-            }}
-          >
-            Delete
-          </button>
-        </div>
       </div>
+
+      <ReaderNav
+        article={article}
+        onDelete={() => setConfirmingDelete(true)}
+        trim={trimControls}
+      />
+
+      <AlertDialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this article?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {article.title} — this can&apos;t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                void deleteArticle(article.id).then(() => router.push("/read"));
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

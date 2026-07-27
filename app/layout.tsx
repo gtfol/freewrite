@@ -37,6 +37,7 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "freewrite",
   description: "Write. Don't stop.",
+  robots: { index: false, follow: false },
 };
 
 export default function RootLayout({

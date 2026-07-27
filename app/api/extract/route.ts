@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 
 import { extract, ExtractError } from "@/lib/extract";
+import type { ExtractSource } from "@/lib/types";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
+
+const SOURCES: ExtractSource[] = ["direct", "archive", "paste"];
 
 export async function POST(request: Request) {
-  let body: { url?: unknown; archive?: unknown };
+  let body: { url?: unknown; source?: unknown; html?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -16,8 +20,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing url" }, { status: 400 });
   }
 
+  const source = SOURCES.includes(body.source as ExtractSource)
+    ? (body.source as ExtractSource)
+    : "direct";
+
+  const html = typeof body.html === "string" ? body.html : undefined;
+
   try {
-    const article = await extract(body.url, body.archive === true);
+    const article = await extract(body.url, source, html);
     return NextResponse.json(article);
   } catch (error) {
     if (error instanceof ExtractError) {

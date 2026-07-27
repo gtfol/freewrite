@@ -2,7 +2,7 @@ import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import sanitizeHtml from "sanitize-html";
 
-import type { ExtractedArticle } from "@/lib/types";
+import type { ExtractedArticle, ExtractSource } from "@/lib/types";
 
 export class ExtractError extends Error {}
 
@@ -11,7 +11,7 @@ const MAX_HTML_BYTES = 5 * 1024 * 1024;
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
-export function normalizeUrl(raw: string): URL {
+function parseUrl(raw: string): URL {
   const trimmed = raw.trim();
   if (!trimmed) throw new ExtractError("No URL provided");
   const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(trimmed)
@@ -24,6 +24,14 @@ export function normalizeUrl(raw: string): URL {
   } catch {
     throw new ExtractError("That doesn't look like a valid URL");
   }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new ExtractError("Only http(s) URLs are supported");
+  }
+  return url;
+}
+
+export function normalizeUrl(raw: string): URL {
+  const url = parseUrl(raw);
   assertPublicHost(url);
   return url;
 }
@@ -102,8 +110,21 @@ function absolutize(value: string | undefined, base: string): string | null {
   }
 }
 
-function sanitizeContent(html: string, baseUrl: string): string {
+// Pasted pages arrive with app chrome around the text; these tags (and
+// their text) are noise there, whereas Readability output never has them.
+const CHROME_TAGS = [
+  "script", "style", "noscript", "textarea", "option", "select",
+  "button", "nav", "form", "dialog", "svg", "canvas", "iframe",
+  "audio", "video",
+];
+
+function sanitizeContent(
+  html: string,
+  baseUrl: string,
+  { discardChrome = false } = {}
+): string {
   return sanitizeHtml(html, {
+    ...(discardChrome ? { nonTextTags: CHROME_TAGS } : {}),
     allowedTags: [
       "h1", "h2", "h3", "h4", "h5", "h6",
       "p", "a", "ul", "ol", "li", "blockquote",
@@ -149,11 +170,22 @@ function sanitizeContent(html: string, baseUrl: string): string {
 }
 
 function countWords(html: string): number {
-  const text = html
+  return visibleText(html).split(/\s+/).filter(Boolean).length;
+}
+
+function visibleText(html: string): string {
+  return html
+    .replace(/<(script|style|noscript)[^>]*>[\s\S]*?<\/\1>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&[a-z#0-9]+;/gi, " ")
     .trim();
-  return text ? text.split(/\s+/).length : 0;
+}
+
+function looksLikeJsShell(html: string): boolean {
+  return (
+    visibleText(html).length < 500 &&
+    (html.match(/<script/gi)?.length ?? 0) > 0
+  );
 }
 
 function parseReadable(
@@ -168,6 +200,11 @@ function parseReadable(
   const result = reader.parse();
 
   if (!result?.content) {
+    if (looksLikeJsShell(html)) {
+      throw new ExtractError(
+        "That page is a JavaScript app — it has no static text to pull. Open it in your browser, copy everything, and paste it in instead."
+      );
+    }
     throw new ExtractError("Couldn't find readable content on that page");
   }
 
@@ -199,7 +236,7 @@ async function extractTweet(url: URL): Promise<ExtractedArticle> {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
   } catch {
-    throw new ExtractError("Couldn't reach X");
+    throw new ExtractError("Couldn't reach Twitter");
   }
   if (!res.ok) {
     throw new ExtractError("Couldn't load that post — it may be private or deleted");
@@ -228,9 +265,9 @@ async function extractTweet(url: URL): Promise<ExtractedArticle> {
 
   return {
     url: oembed.url ?? canonical,
-    title: author ? `${author} on X` : "Post on X",
+    title: author ? `${author} on Twitter` : "Post on Twitter",
     byline: author,
-    siteName: "X",
+    siteName: "Twitter",
     excerpt: null,
     content,
     wordCount: countWords(content),
@@ -259,13 +296,49 @@ async function extractArxiv(url: URL, id: string): Promise<ExtractedArticle> {
   return { ...article, siteName: article.siteName ?? "arXiv" };
 }
 
+// Content the user copied out of their own browser tab — the one path that
+// works for pages a server can never fetch (logins, paywalls, JS-only apps).
+// Nothing is fetched, so private hosts are fine and Readability is skipped:
+// the user already chose what to copy.
+function extractPasted(html: string, rawUrl: string): ExtractedArticle {
+  const url = parseUrl(rawUrl);
+  if (html.length > MAX_HTML_BYTES) {
+    throw new ExtractError("That paste is too large to save");
+  }
+
+  const content = sanitizeContent(html, url.href, { discardChrome: true });
+  const wordCount = countWords(content);
+  if (wordCount === 0) {
+    throw new ExtractError("That paste didn't contain any readable text");
+  }
+
+  const { document } = parseHTML(`<article>${content}</article>`);
+  const heading = document.querySelector("h1, h2")?.textContent?.trim();
+
+  return {
+    url: url.href,
+    title: heading?.slice(0, 160) || url.hostname.replace(/^www\./, ""),
+    byline: null,
+    siteName: null,
+    excerpt: null,
+    content,
+    wordCount,
+  };
+}
+
 export async function extract(
   rawUrl: string,
-  useArchive: boolean
+  source: ExtractSource,
+  pastedHtml?: string
 ): Promise<ExtractedArticle> {
+  if (source === "paste") {
+    if (!pastedHtml?.trim()) throw new ExtractError("Nothing was pasted");
+    return extractPasted(pastedHtml, rawUrl);
+  }
+
   const url = normalizeUrl(rawUrl);
 
-  if (useArchive) {
+  if (source === "archive") {
     const { html, finalUrl } = await fetchHtml(
       `https://archive.ph/newest/${url.href}`
     );
