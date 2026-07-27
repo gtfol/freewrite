@@ -1,8 +1,10 @@
 "use client";
 
+import "katex/dist/katex.min.css";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 
 import {
   AlertDialog,
@@ -43,6 +45,7 @@ export default function ArticlePage({
   const [article, setArticle] = useState<Article | null | undefined>(undefined);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [trim, setTrim] = useState<TrimSession | null>(null);
+  const bodyRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     void getArticle(id).then((found) => {
@@ -53,6 +56,30 @@ export default function ArticlePage({
       }
     });
   }, [id]);
+
+  // TeX arrives stored as <span class="math">…</span>; render it with KaTeX
+  // after the HTML is in the DOM. KaTeX only loads for articles that have
+  // math, and re-runs when trim rebuilds the blocks.
+  const hasMath = !!article?.content.includes('class="math');
+  const trimBlocks = trim?.blocks;
+  useEffect(() => {
+    if (!hasMath) return;
+    let cancelled = false;
+    void import("katex").then(({ default: katex }) => {
+      if (cancelled || !bodyRef.current) return;
+      const spans =
+        bodyRef.current.querySelectorAll<HTMLElement>("span.math:not(:has(.katex))");
+      for (const el of spans) {
+        katex.render(el.textContent ?? "", el, {
+          displayMode: el.classList.contains("math-display"),
+          throwOnError: false,
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasMath, article?.content, trimBlocks]);
 
   if (article === undefined) return <main className="min-h-dvh" />;
 
@@ -152,7 +179,10 @@ export default function ArticlePage({
             Trimming — click a block to remove it. Nothing is saved until Done.
           </p>
         )}
-        <article style={{ fontFamily: "var(--font-crimson), Georgia, serif" }}>
+        <article
+          ref={bodyRef}
+          style={{ fontFamily: "var(--font-crimson), Georgia, serif" }}
+        >
           <h1 className="text-[1.75rem] leading-tight font-semibold">
             {article.title}
           </h1>

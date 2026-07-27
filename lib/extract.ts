@@ -148,6 +148,8 @@ function sanitizeContent(
       th: ["colspan", "rowspan"],
       td: ["colspan", "rowspan"],
     },
+    // TeX carriers rendered client-side by KaTeX on the article page.
+    allowedClasses: { span: ["math", "math-display"] },
     allowedSchemes: ["http", "https"],
     transformTags: {
       a: (tagName, attribs) => {
@@ -217,7 +219,7 @@ function parseReadable(
     throw new ExtractError("Couldn't find readable content on that page");
   }
 
-  const content = sanitizeContent(result.content, sourceUrl);
+  const content = sanitizeContent(normalizeMathHtml(result.content), sourceUrl);
   return {
     url: canonicalUrl,
     title: result.title?.trim() || new URL(canonicalUrl).hostname,
@@ -305,14 +307,104 @@ async function extractArxiv(url: URL, id: string): Promise<ExtractedArticle> {
   return { ...article, siteName: article.siteName ?? "arXiv" };
 }
 
+const escapeText = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// TeX survives storage as <span class="math">…</span> (display variant for
+// block math); the article page renders those with KaTeX. Shielding happens
+// BEFORE marked runs, because markdown rules chew raw TeX (x_i + y_j turns
+// into emphasis). Code fences/spans are left alone, and single-$ pairs only
+// count as math when the body looks like TeX — "$5 and $10" stays currency.
+function renderMarkdown(md: string): string {
+  const stash: { tex: string; display: boolean }[] = [];
+  const token = (tex: string, display: boolean) => {
+    stash.push({ tex: tex.trim(), display });
+    return `%%%MATH${stash.length - 1}%%%`;
+  };
+
+  const shielded = md
+    .split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/)
+    .map((segment, i) => {
+      if (i % 2 === 1) return segment;
+      return segment
+        .replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => token(tex, true))
+        .replace(/\\\[([\s\S]+?)\\\]/g, (_, tex) => token(tex, true))
+        .replace(/\\\(([\s\S]+?)\\\)/g, (_, tex) => token(tex, false))
+        .replace(/(?<![\w$\\])\$([^$\n]+?)\$(?![\w$])/g, (match, tex) =>
+          /[\\^_{]/.test(tex) ? token(tex, false) : match
+        );
+    })
+    .join("");
+
+  const html = marked.parse(shielded, { async: false });
+  return html.replace(/%%%MATH(\d+)%%%/g, (_, i) => {
+    const m = stash[Number(i)];
+    if (!m) return "";
+    return `<span class="math${m.display ? " math-display" : ""}">${escapeText(m.tex)}</span>`;
+  });
+}
+
+// Recovers TeX from math markup before sanitization flattens it: LaTeXML /
+// Wikipedia MathML (alttext or annotation), KaTeX clipboard copies, and
+// MathJax containers. Where no TeX survives, the visual/assistive duplicate
+// still collapses to a single plain-text copy.
+function normalizeMathHtml(html: string): string {
+  if (!/<math|<mjx-|class="katex|class='katex/i.test(html)) return html;
+  try {
+    const { document } = parseHTML(`<html><body>${html}</body></html>`);
+
+    const texOf = (scope: Element): string | null =>
+      scope
+        .querySelector('annotation[encoding="application/x-tex"]')
+        ?.textContent?.trim() ||
+      scope.getAttribute("alttext")?.trim() ||
+      scope.querySelector("math")?.getAttribute("alttext")?.trim() ||
+      null;
+
+    const replaceWithSpan = (el: Element, tex: string, display: boolean) => {
+      const span = document.createElement("span");
+      span.setAttribute("class", display ? "math math-display" : "math");
+      span.textContent = tex;
+      el.replaceWith(span);
+    };
+
+    for (const el of Array.from(
+      document.querySelectorAll(".katex, mjx-container")
+    )) {
+      if (!document.contains(el)) continue;
+      const target = el.closest(".katex-display") ?? el;
+      const display =
+        el.tagName.toLowerCase() === "mjx-container"
+          ? el.getAttribute("display") === "true"
+          : target !== el;
+      const tex = texOf(el);
+      if (tex) {
+        replaceWithSpan(target, tex, display);
+      } else {
+        const plain = el.querySelector("math")?.textContent?.trim();
+        if (plain) target.replaceWith(document.createTextNode(plain));
+      }
+    }
+
+    for (const m of Array.from(document.querySelectorAll("math"))) {
+      if (!document.contains(m)) continue;
+      const tex = texOf(m);
+      if (tex) replaceWithSpan(m, tex, m.getAttribute("display") === "block");
+    }
+
+    return document.body.innerHTML;
+  } catch {
+    return html;
+  }
+}
+
 function extractFromMarkdown(
   md: string,
   sourceUrl: string,
   canonicalUrl: string,
   meta?: { title?: string | null; excerpt?: string | null }
 ): ExtractedArticle {
-  const html = marked.parse(md, { async: false });
-  const content = sanitizeContent(html, sourceUrl);
+  const content = sanitizeContent(renderMarkdown(md), sourceUrl);
   const wordCount = countWords(content);
   if (wordCount === 0) {
     throw new ExtractError("Couldn't find readable content in that file");
@@ -439,15 +531,12 @@ function extractPasted(paste: PastedPayload, rawUrl: string): ExtractedArticle {
   }
 
   const fromHtml = html
-    ? sanitizeContent(html, url.href, { discardChrome: true })
+    ? sanitizeContent(normalizeMathHtml(html), url.href, { discardChrome: true })
     : null;
 
   let content: string;
   if (text && looksLikeMarkdown(text) && (!fromHtml || !hasBlockStructure(fromHtml))) {
-    content = sanitizeContent(
-      marked.parse(text, { gfm: true, async: false }),
-      url.href
-    );
+    content = sanitizeContent(renderMarkdown(text), url.href);
   } else if (fromHtml) {
     content = fromHtml;
   } else if (text) {
