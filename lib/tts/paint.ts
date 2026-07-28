@@ -13,6 +13,7 @@ import type { TextIndex } from "@/lib/highlights";
 
 interface HighlightLike {
   readonly size?: number;
+  priority?: number;
 }
 type HighlightCtor = new (...ranges: Range[]) => HighlightLike;
 type HighlightRegistry = {
@@ -22,6 +23,20 @@ type HighlightRegistry = {
 
 export const WORD_HIGHLIGHT = "tts-word";
 export const SENTENCE_HIGHLIGHT = "tts-sentence";
+export const SEEK_WORD_HIGHLIGHT = "tts-seek-word";
+export const SEEK_SENTENCE_HIGHLIGHT = "tts-seek-sentence";
+
+// Overlapping highlights paint by priority, and all four of these overlap the
+// moment someone hovers the sentence being read. Top to bottom: where the
+// voice is, where a click would send it, then the two sentence washes. Without
+// this the order would be registration order, which is whatever happened to be
+// painted first.
+const PRIORITIES: Record<string, number> = {
+  [WORD_HIGHLIGHT]: 4,
+  [SEEK_WORD_HIGHLIGHT]: 3,
+  [SENTENCE_HIGHLIGHT]: 2,
+  [SEEK_SENTENCE_HIGHLIGHT]: 1,
+};
 
 function registry(): HighlightRegistry | null {
   const css = (globalThis as { CSS?: { highlights?: HighlightRegistry } }).CSS;
@@ -91,7 +106,9 @@ export function setHighlight(name: string, ranges: Range[]): void {
     store.delete(name);
     return;
   }
-  store.set(name, new Ctor(...ranges));
+  const highlight = new Ctor(...ranges);
+  highlight.priority = PRIORITIES[name] ?? 0;
+  store.set(name, highlight);
 }
 
 export function clearHighlight(name: string): void {
@@ -100,12 +117,28 @@ export function clearHighlight(name: string): void {
 
 const OVERLAY_ATTR = "data-tts-overlay";
 
+// Which colour each fallback layer draws in, and the order they stack — the
+// Highlight API's priority has no equivalent here, so the seek preview simply
+// goes in first and the read-along paints over it.
+const OVERLAY_LAYERS = ["seek", "word"] as const;
+export type OverlayLayer = (typeof OVERLAY_LAYERS)[number];
+const OVERLAY_COLORS: Record<OverlayLayer, string> = {
+  seek: "var(--seek-word)",
+  word: "var(--read-word)",
+};
+
 // Fallback painter for browsers without the Highlight API: the same Range,
 // drawn as rectangles behind the text. Still no mutation of the article —
 // the rects live in their own layer inside the wrapper, which is also why
 // this is imperative rather than a React subtree repainting at 60fps.
-export function paintOverlay(wrap: HTMLElement, range: Range | null): void {
-  const existing = wrap.querySelector<HTMLElement>(`[${OVERLAY_ATTR}]`);
+export function paintOverlay(
+  wrap: HTMLElement,
+  range: Range | null,
+  layer: OverlayLayer = "word"
+): void {
+  const existing = wrap.querySelector<HTMLElement>(
+    `[${OVERLAY_ATTR}="${layer}"]`
+  );
   if (!range) {
     existing?.remove();
     return;
@@ -113,10 +146,11 @@ export function paintOverlay(wrap: HTMLElement, range: Range | null): void {
 
   const host = existing ?? document.createElement("div");
   if (!existing) {
-    host.setAttribute(OVERLAY_ATTR, "");
+    host.setAttribute(OVERLAY_ATTR, layer);
     host.setAttribute("aria-hidden", "true");
-    host.style.cssText =
-      "position:absolute;inset:0;pointer-events:none;z-index:-1";
+    host.style.cssText = `position:absolute;inset:0;pointer-events:none;z-index:${
+      OVERLAY_LAYERS.indexOf(layer) - OVERLAY_LAYERS.length
+    }`;
     wrap.appendChild(host);
   }
 
@@ -130,7 +164,7 @@ export function paintOverlay(wrap: HTMLElement, range: Range | null): void {
         `top:${rect.top - origin.top}px`,
         `width:${rect.width}px`,
         `height:${rect.height}px`,
-        "background:var(--read-word)",
+        `background:${OVERLAY_COLORS[layer]}`,
         "border-radius:2px",
       ].join(";");
       return span;
@@ -138,8 +172,10 @@ export function paintOverlay(wrap: HTMLElement, range: Range | null): void {
   );
 }
 
-export function clearOverlay(wrap: HTMLElement): void {
-  wrap.querySelector(`[${OVERLAY_ATTR}]`)?.remove();
+// A layer, or every layer when none is named.
+export function clearOverlay(wrap: HTMLElement, layer?: OverlayLayer): void {
+  const selector = layer ? `[${OVERLAY_ATTR}="${layer}"]` : `[${OVERLAY_ATTR}]`;
+  for (const node of wrap.querySelectorAll(selector)) node.remove();
 }
 
 // The inverse map, for click-to-seek: a point in the document becomes an
