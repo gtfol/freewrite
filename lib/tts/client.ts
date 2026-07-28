@@ -21,6 +21,38 @@ import type { WorkerRequest, WorkerResponse } from "@/lib/tts/worker";
 // article from doing 300 serialisations of the same growing object.
 const PERSIST_DEBOUNCE_MS = 1500;
 
+// An exhausted wasm heap reads as an allocation failure somewhere inside the
+// engine. The model is the largest single thing it allocates, so this is the
+// shape it usually takes:
+//
+//   Can't create a session. failed to allocate a buffer of size 63201294.
+//
+// A wasm heap can grow but never shrink, and it dies only with the thread that
+// owns it, so there is no way to recover in place — which is what makes this
+// worth catching rather than just reporting.
+const OUT_OF_MEMORY =
+  /failed to allocate|out of memory|cannot enlarge memory|memory access out of bounds|abort\(oom/i;
+
+export function isOutOfMemory(message: string): boolean {
+  return OUT_OF_MEMORY.test(message);
+}
+
+// A worker can also just die — the browser kills the thread outright under
+// memory pressure, and there is no message to read afterwards. It looks like
+// silence, so it has to be turned back into an answer or the queue waits on a
+// reply that can never arrive.
+const WORKER_DIED = "the synthesis engine stopped unexpectedly";
+
+function recoverable(message: string): boolean {
+  return isOutOfMemory(message) || message === WORKER_DIED;
+}
+
+// A budget for the whole audiobook rather than per chunk. With the session
+// hoisted out of the per-chunk path this should never be spent; if something
+// is still leaking, two restarts is enough to prove it and stop, instead of
+// restarting the engine between every sentence for the rest of the article.
+const MAX_RESTARTS = 2;
+
 export interface EngineStatus {
   engine: EngineId;
 }
@@ -43,6 +75,7 @@ export class AudiobookGenerator {
   private stopped = false;
   private cursor = 0;
   private wantAll = false;
+  private restarts = 0;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
   private book: Audiobook;
 
@@ -153,8 +186,13 @@ export class AudiobookGenerator {
           if (key) this.waiting.get(key)?.(message);
         }
       };
-      worker.onerror = (event) =>
-        reject(new Error(event.message || "synthesis worker failed"));
+      worker.onerror = (event) => {
+        const message = event.message || WORKER_DIED;
+        // A no-op once the engine is up; from then on the chunks in flight are
+        // what needs answering.
+        reject(new Error(message));
+        this.failWaiting(message);
+      };
 
       const init: WorkerRequest = { type: "init", voiceId: this.voiceId };
       worker.postMessage(init);
@@ -164,6 +202,54 @@ export class AudiobookGenerator {
       this.starting = null;
     });
     return this.starting;
+  }
+
+  // Settles every chunk still waiting on the worker. Called when the worker
+  // goes away, which is the one case where no reply is ever coming.
+  private failWaiting(message: string) {
+    const pending = [...this.waiting.values()];
+    this.waiting.clear();
+    for (const settle of pending) settle({ type: "error", message });
+  }
+
+  // Trades the worker for a new one. The wasm heap belongs to the thread, so a
+  // fresh thread is the only way to get a fresh heap — and the voice is on
+  // disk by now, so the restart costs a model load rather than a download.
+  private async restart(): Promise<void> {
+    this.restarts++;
+    this.worker?.terminate();
+    this.worker = null;
+    this.status = null;
+    this.starting = null;
+    this.waiting.clear();
+    await this.ensureWorker();
+  }
+
+  private async startEngine(): Promise<void> {
+    try {
+      await this.ensureWorker();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!recoverable(message) || this.restarts >= MAX_RESTARTS) throw error;
+      // Loading the model was itself what ran out of room: another tab, or an
+      // earlier engine in this one, is holding memory it may since have given
+      // back. Worth one clean attempt before giving up on the article.
+      await this.restart();
+    }
+  }
+
+  // Synthesis with one recovery attempt. The retry runs against a new worker,
+  // so the chunk that failed is retried with the whole heap to itself.
+  private async synthesize(chunk: StoredChunk): Promise<WorkerResponse> {
+    const response = await this.send(chunk);
+    if (response.type !== "error" || !recoverable(response.message)) {
+      return response;
+    }
+    if (this.stopped || this.restarts >= MAX_RESTARTS) return response;
+
+    await this.restart();
+    if (this.stopped) return response;
+    return this.send(chunk);
   }
 
   private send(chunk: StoredChunk): Promise<WorkerResponse> {
@@ -214,7 +300,7 @@ export class AudiobookGenerator {
     this.running = true;
 
     try {
-      await this.ensureWorker();
+      await this.startEngine();
 
       for (let index = this.next(); index !== -1; index = this.next()) {
         if (this.stopped) break;
@@ -228,7 +314,7 @@ export class AudiobookGenerator {
           chunk.bytes = cached.bytes;
           chunk.wordTimes ??= [];
         } else {
-          const response = await this.send(chunk);
+          const response = await this.synthesize(chunk);
           if (this.stopped) break;
           if (response.type === "error") {
             this.emitState({ status: "error", message: response.message });
@@ -305,6 +391,8 @@ export class AudiobookGenerator {
     void putAudiobook(this.book);
     this.worker?.terminate();
     this.worker = null;
+    this.status = null;
     this.starting = null;
+    this.failWaiting("generation stopped");
   }
 }

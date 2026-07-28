@@ -7,16 +7,20 @@
 // build that doesn't is a ~326MB download that still runs slower on CPU. The
 // indirection stays because it is what made that swap a small change.
 //
+// The engine is built once and lives as long as the worker does. That is load
+// bearing rather than tidy — see lib/tts/piper.ts.
+//
 // The worker also trims silence, derives word times, and encodes to Opus, so
 // the main thread gets a finished chunk and never sees a raw waveform.
 
 import { encodeAudio } from "@/lib/tts/codec";
+import { createPiper, type Synthesis } from "@/lib/tts/piper";
 import { trimSilence, wordTimes } from "@/lib/tts/timing";
 import { engineVoiceId, findVoice } from "@/lib/tts/voices";
 import type { EngineId, WordSpan } from "@/lib/tts/types";
 
 interface Engine {
-  synth(text: string): Promise<{ audio: Float32Array; sampleRate: number }>;
+  synth(text: string): Promise<Synthesis>;
 }
 
 export type WorkerRequest =
@@ -51,67 +55,13 @@ function post(message: WorkerResponse, transfer?: Transferable[]) {
   scope.postMessage(message, transfer ?? []);
 }
 
-// Piper hands back a WAV blob rather than samples.
-function parseWav(buffer: ArrayBuffer): {
-  audio: Float32Array;
-  sampleRate: number;
-} {
-  const view = new DataView(buffer);
-  let sampleRate = 22050;
-  let bits = 16;
-  let at = 12;
-
-  while (at + 8 <= buffer.byteLength) {
-    const id = String.fromCharCode(
-      view.getUint8(at),
-      view.getUint8(at + 1),
-      view.getUint8(at + 2),
-      view.getUint8(at + 3)
-    );
-    const size = view.getUint32(at + 4, true);
-    const body = at + 8;
-
-    if (id === "fmt ") {
-      sampleRate = view.getUint32(body + 4, true);
-      bits = view.getUint16(body + 14, true);
-    } else if (id === "data") {
-      const count = size / (bits / 8);
-      const audio = new Float32Array(count);
-      for (let i = 0; i < count; i++) {
-        audio[i] =
-          bits === 16
-            ? view.getInt16(body + i * 2, true) / 0x8000
-            : view.getFloat32(body + i * 4, true);
-      }
-      return { audio, sampleRate };
-    }
-    at = body + size + (size % 2);
-  }
-  throw new Error("no PCM data in engine output");
-}
-
-async function loadPiper(voice: string): Promise<Engine> {
-  const vits = await import("@diffusionstudio/vits-web");
-  type VoiceId = Parameters<typeof vits.predict>[0]["voiceId"];
-  const voiceId = voice as VoiceId;
-
-  await vits.download(voiceId, (progress) => {
-    post({ type: "progress", loaded: progress.loaded, total: progress.total });
-  });
-
-  return {
-    async synth(text) {
-      const blob = await vits.predict({ text, voiceId });
-      return parseWav(await blob.arrayBuffer());
-    },
-  };
-}
-
 async function init(voiceId: string) {
   const voice = findVoice(voiceId);
   if (!voice) throw new Error(`unknown voice ${voiceId}`);
 
-  engine = await loadPiper(engineVoiceId(voice));
+  engine = await createPiper(engineVoiceId(voice), (loaded, total) => {
+    post({ type: "progress", loaded, total });
+  });
   post({ type: "ready", engine: voice.engine });
 }
 

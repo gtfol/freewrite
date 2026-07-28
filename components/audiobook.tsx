@@ -9,7 +9,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import type { TextIndex } from "@/lib/highlights";
-import { AudiobookGenerator } from "@/lib/tts/client";
+import { AudiobookGenerator, isOutOfMemory } from "@/lib/tts/client";
 import {
   clearHighlight,
   clearOverlay,
@@ -306,6 +306,11 @@ export function Audiobook({
 
   const status = (() => {
     if (generation.status === "error") {
+      // Restarting the engine is already tried before this is ever shown, so
+      // by here it's a real dead end and the message has to say what to do.
+      if (isOutOfMemory(generation.message)) {
+        return "Ran out of memory for the voice — try closing other tabs.";
+      }
       // Voices are fetched on first use, so the common failure is the network
       // rather than anything the raw message would help with.
       return /fetch|network|load|http/i.test(generation.message)
