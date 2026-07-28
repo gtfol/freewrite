@@ -211,10 +211,14 @@ export function MarkdownPreview({
   content,
   fontFamily,
   fontSize,
+  className = "mx-auto max-w-[650px] space-y-5 px-6 pt-14 pb-28",
 }: {
   content: string;
   fontFamily: string;
   fontSize: number;
+  // The writer's side-by-side pane owns its own padding; a shared entry sits
+  // under its meta line and needs a different one.
+  className?: string;
 }) {
   const segments = useMemo(() => segment(content), [content]);
   const [zoomed, setZoomed] = useState<LightboxMedia | null>(null);
@@ -249,7 +253,7 @@ export function MarkdownPreview({
           if (e.key !== "Enter" && e.key !== " ") return;
           if (openFrom(e.target)) e.preventDefault();
         }}
-        className="mx-auto max-w-[650px] space-y-5 px-6 pt-14 pb-28"
+        className={className}
       >
         {segments.length === 0 && (
           <p
