@@ -74,10 +74,14 @@ export class AudiobookGenerator {
   // clean, and the collector reclaims whatever the old manifest held.
   async open(): Promise<void> {
     const cached = await getAudiobook(this.articleId);
+    // `model` belongs in this check as much as the voice does: chunk keys are
+    // hash(model, voice, text), so adopting a manifest built against an older
+    // model would keep playing audio the current keys no longer point at.
     if (
       cached &&
       cached.contentHash === this.contentHash &&
       cached.voiceId === this.voiceId &&
+      cached.model === this.book.model &&
       cached.chunks.length === this.book.chunks.length
     ) {
       this.book = { ...cached, lastPlayedAt: Date.now() };
@@ -87,10 +91,6 @@ export class AudiobookGenerator {
 
   get chunks(): StoredChunk[] {
     return this.book.chunks;
-  }
-
-  get engineStatus(): EngineStatus | null {
-    return this.status;
   }
 
   get pinned(): boolean {

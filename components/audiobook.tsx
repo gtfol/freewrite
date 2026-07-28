@@ -23,10 +23,10 @@ import {
 } from "@/lib/tts/paint";
 import {
   AudiobookPlayer,
-  buildTimeline,
   type PlayerState,
   type Position,
 } from "@/lib/tts/player";
+import { buildTimeline } from "@/lib/tts/timing";
 import { contentHash, segmentArticle } from "@/lib/tts/segment";
 import { collectGarbage, requestPersistence } from "@/lib/tts/store";
 import { DEFAULT_VOICE, findVoice, VOICES } from "@/lib/tts/voices";
@@ -270,10 +270,10 @@ export function Audiobook({
   const playing = playerState === "playing" || playerState === "buffering";
 
   const toggle = () => {
-    const player = playerRef.current;
-    if (!player) return;
-    player.toggle();
-    if (!playing) generatorRef.current?.prioritize(0);
+    // play() already points the generator at the resume position through
+    // onNeed. Prioritising anything here would override that and send
+    // synthesis back to the top of the article after a seek.
+    playerRef.current?.toggle();
   };
 
   const changeSpeed = (next: number) => {

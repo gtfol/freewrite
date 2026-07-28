@@ -31,8 +31,24 @@ const QUOTA_SHARE = 0.5;
 export const getAudiobook = (articleId: string) =>
   localGet<Audiobook>(AUDIOBOOKS, articleId);
 
-export const putAudiobook = (book: Audiobook) =>
-  localPut<Audiobook>(AUDIOBOOKS, book);
+// Manifest writes are serialized per article. Switching voice disposes the old
+// generator and opens a new one against the same key, and both write; without
+// ordering, the disposing generator's write can land last and reinstate the
+// voice the reader just left.
+const manifestWrites = new Map<string, Promise<unknown>>();
+
+export function putAudiobook(book: Audiobook): Promise<void> {
+  const id = book.articleId;
+  const pending = (manifestWrites.get(id) ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(() => localPut<Audiobook>(AUDIOBOOKS, book));
+
+  manifestWrites.set(id, pending);
+  void pending.catch(() => undefined).then(() => {
+    if (manifestWrites.get(id) === pending) manifestWrites.delete(id);
+  });
+  return pending;
+}
 
 export const getChunk = (key: string) => localGet<AudioRecord>(AUDIO, key);
 
@@ -42,13 +58,6 @@ export const putChunk = (record: AudioRecord) =>
 export async function deleteAudiobook(articleId: string): Promise<void> {
   await localDeleteMany(AUDIOBOOKS, [articleId]);
   await collectGarbage();
-}
-
-// Which of these chunks are already synthesized — the resume path after a
-// reload, and what lets a re-listen start instantly.
-export async function cachedKeys(keys: string[]): Promise<Set<string>> {
-  const present = new Set(await localKeys(AUDIO));
-  return new Set(keys.filter((key) => present.has(key)));
 }
 
 function bookBytes(book: Audiobook): number {
@@ -79,21 +88,6 @@ export async function requestPersistence(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-export interface StorageReport {
-  bytes: number;
-  books: number;
-  pinned: number;
-}
-
-export async function storageReport(): Promise<StorageReport> {
-  const books = await localGetAll<Audiobook>(AUDIOBOOKS);
-  return {
-    bytes: books.reduce((sum, book) => sum + bookBytes(book), 0),
-    books: books.length,
-    pinned: books.filter((book) => book.pinned).length,
-  };
 }
 
 // Three passes, cheapest first:

@@ -8,16 +8,13 @@
 // Silence between chunks lives here and nowhere else. The audio itself is
 // trimmed clean, so every pause in the reading is one this scheduler placed.
 
+import { buildTimeline, wordIndexAt } from "@/lib/tts/timing";
 import type { Samples } from "@/lib/tts/codec";
 import type { StoredChunk } from "@/lib/tts/types";
 
 const LOOKAHEAD = 3;
 const PREROLL_SECONDS = 0.08;
 const BUFFER_CACHE = 16;
-// Characters per second of speech, for chunks that haven't been generated
-// yet. Only affects the progress bar and time labels, which settle as real
-// durations arrive.
-const CHARS_PER_SECOND = 14.5;
 // Pauses shrink more slowly than speech does. At 2x, halving them too would
 // collapse paragraph structure into a wall of words; this keeps the beats
 // audible while still feeling faster.
@@ -50,25 +47,6 @@ interface Scheduled {
   end: number;
   offset: number;
   source: AudioBufferSourceNode;
-}
-
-export function estimateDuration(chunk: StoredChunk): number {
-  return chunk.duration ?? Math.max(0.3, chunk.text.length / CHARS_PER_SECOND);
-}
-
-// Content-time starts for every chunk, gaps included, always at 1x. Used for
-// the scrubber and for turning a click into a position.
-export function buildTimeline(chunks: StoredChunk[]): {
-  starts: number[];
-  total: number;
-} {
-  const starts: number[] = [];
-  let at = 0;
-  for (const chunk of chunks) {
-    starts.push(at);
-    at += estimateDuration(chunk) + chunk.gapAfter / 1000;
-  }
-  return { starts, total: at };
 }
 
 export class AudiobookPlayer {
@@ -225,11 +203,20 @@ export class AudiobookPlayer {
       // Before the first chunk starts, sit at its offset; inside one, track
       // it; past its end we're in a gap, so hold at the chunk's full length
       // and the last word stays lit like a held breath.
+      const inGap = !active && now >= current.end;
       const inChunk = active
         ? (now - current.start) * this.speed + current.offset
         : now < current.start
           ? current.offset
           : (current.end - current.start) * this.speed + current.offset;
+
+      // Resuming from a pause taken during a gap should pick up the next
+      // chunk, not restart at the end of the finished one and sit through the
+      // same silence twice.
+      this.resumeAt = inGap
+        ? { index: Math.min(current.index + 1, this.chunks.length - 1), offset: 0 }
+        : { index: current.index, offset: inChunk };
+
       this.report(current.index, inChunk);
     }
 
@@ -255,17 +242,7 @@ export class AudiobookPlayer {
     const chunk = this.chunks[chunkIndex];
     if (!chunk) return;
 
-    this.resumeAt = { index: chunkIndex, offset: inChunk };
-
-    let wordIndex = -1;
-    const times = chunk.wordTimes;
-    if (times) {
-      for (let i = 0; i < times.length; i++) {
-        if (times[i] <= inChunk) wordIndex = i;
-        else break;
-      }
-    }
-
+    const wordIndex = wordIndexAt(chunk.wordTimes, inChunk);
     const { starts, total } = this.currentTimeline();
     this.callbacks.onPosition?.({
       chunkIndex,

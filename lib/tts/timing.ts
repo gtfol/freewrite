@@ -6,7 +6,7 @@
 // then snapped to the nearest trough in the energy envelope, which recovers
 // most of the error around commas and natural breaths.
 
-import type { WordSpan } from "@/lib/tts/types";
+import type { StoredChunk, WordSpan } from "@/lib/tts/types";
 
 const FRAME_SECONDS = 0.01;
 // Below 2% of chunk peak counts as silence. Relative rather than absolute
@@ -18,14 +18,58 @@ const GUARD_SECONDS = 0.02;
 // How far a boundary may move to find a trough.
 const SNAP_SECONDS = 0.09;
 const MIN_WORD_SECONDS = 0.04;
+// Characters per second of speech, for chunks that haven't been generated yet.
+// Only affects the progress bar and time labels, which settle as real
+// durations arrive.
+const CHARS_PER_SECOND = 14.5;
+// Read-along that lands exactly on a word's acoustic onset reads as late: the
+// eye needs time to find the word before it is spoken. Leading slightly is
+// what makes the highlight feel locked to the voice instead of chasing it.
+// Applied at read time rather than baked into the stored word times, so it
+// stays tunable without regenerating a single chunk.
+const WORD_LEAD_SECONDS = 0.06;
 
-// Extra weight, in characters-equivalent, bought by punctuation following a
-// word. A comma really does cost about half a short word of time.
+// Extra weight, in syllable-equivalents, bought by punctuation following a
+// word. A comma really does cost about a syllable and a half of time.
 function pauseWeight(gap: string): number {
-  if (/[;:—–]/.test(gap)) return 7;
-  if (/,/.test(gap)) return 5;
-  if (/[.!?]/.test(gap)) return 3;
+  if (/[;:—–]/.test(gap)) return 2;
+  if (/,/.test(gap)) return 1.5;
+  if (/[.!?]/.test(gap)) return 1;
   return 0;
+}
+
+// Speech duration tracks syllables far more closely than characters, which is
+// what made the first version drift: "through" is seven characters and one
+// syllable, "idea" is four characters and two. Vowel-group counting is crude
+// but its errors are small and unbiased, where character counting is biased by
+// spelling — consonant clusters run long, vowel-heavy short words run short,
+// and within a sentence that bias accumulates.
+//
+// Known limit: vowels adjacent across a syllable boundary count once, so
+// "audiobook" reads as three. Splitting those pairs was tried and rejected —
+// it breaks every "-tion" word, where "tio" really is one syllable, and a
+// systematic error on common words is worse than an occasional one on rare
+// ones. What remains is small enough for trough-snapping to absorb.
+export function syllables(word: string): number {
+  const w = word.toLowerCase().replace(/[^a-z]/g, "");
+  if (!w) return 1;
+
+  const groups = w.match(/[aeiouy]+/g);
+  let count = groups?.length ?? 1;
+
+  // Silent terminal "e" (time, make) — but not when it carries the only vowel
+  // group (the, be), follows another vowel (see, blue), or forms the syllable
+  // in a consonant + "le" ending (table, little).
+  if (
+    count > 1 &&
+    w.length > 2 &&
+    w.endsWith("e") &&
+    !/[aeiouy]e$/.test(w) &&
+    !/[^aeiouy]le$/.test(w)
+  ) {
+    count--;
+  }
+  return Math.max(1, count);
 }
 
 export function rmsEnvelope(audio: Float32Array, sampleRate: number): Float32Array {
@@ -71,12 +115,12 @@ function interpolate(
   duration: number
 ): number[] {
   const weights = words.map((word, i) => {
-    const chars = word.end - word.start;
+    const spoken = text.slice(word.start - normStart, word.end - normStart);
     const next = words[i + 1];
     const gap = next
       ? text.slice(word.end - normStart, next.start - normStart)
       : text.slice(word.end - normStart);
-    return chars + 1 + pauseWeight(gap);
+    return syllables(spoken) + pauseWeight(gap);
   });
 
   const total = weights.reduce((sum, w) => sum + w, 0) || 1;
@@ -134,4 +178,35 @@ export function wordTimes(
   if (words.length === 0) return [];
   const linear = interpolate(text, words, normStart, duration);
   return snapToTroughs(linear, rmsEnvelope(audio, sampleRate), duration);
+}
+
+// Which word is being spoken at `inChunk` seconds, or -1 before the first.
+export function wordIndexAt(times: number[] | null, inChunk: number): number {
+  if (!times || times.length === 0) return -1;
+  const cue = inChunk + WORD_LEAD_SECONDS;
+  let index = -1;
+  for (let i = 0; i < times.length; i++) {
+    if (times[i] <= cue) index = i;
+    else break;
+  }
+  return index;
+}
+
+export function estimateDuration(chunk: StoredChunk): number {
+  return chunk.duration ?? Math.max(0.3, chunk.text.length / CHARS_PER_SECOND);
+}
+
+// Content-time starts for every chunk, gaps included, always at 1x. Used for
+// the scrubber and for turning a click into a position.
+export function buildTimeline(chunks: StoredChunk[]): {
+  starts: number[];
+  total: number;
+} {
+  const starts: number[] = [];
+  let at = 0;
+  for (const chunk of chunks) {
+    starts.push(at);
+    at += estimateDuration(chunk) + chunk.gapAfter / 1000;
+  }
+  return { starts, total: at };
 }
