@@ -33,8 +33,3 @@ export function randomFont(excludeId: string): AppFont {
   const pool = ALL_FONTS.filter((font) => font.id !== excludeId);
   return pool[Math.floor(Math.random() * pool.length)];
 }
-
-export function nextFontSize(current: number): number {
-  const index = FONT_SIZES.indexOf(current);
-  return FONT_SIZES[(index + 1) % FONT_SIZES.length];
-}

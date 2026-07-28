@@ -7,11 +7,10 @@ import { deleteEntry, listEntries, purgeTombstones, putEntry } from "@/lib/db";
 import {
   createEntry,
   isToday,
-  isWelcomeEntry,
   randomPlaceholder,
   WELCOME_CONTENT,
 } from "@/lib/entries";
-import { DEFAULT_FONT_ID, DEFAULT_FONT_SIZE, nextFontSize } from "@/lib/fonts";
+import { DEFAULT_FONT_ID, DEFAULT_FONT_SIZE } from "@/lib/fonts";
 import { clearShareRecord, getShareRecord } from "@/lib/shares";
 import type { Entry } from "@/lib/types";
 
@@ -21,7 +20,7 @@ interface PrefsState {
   backspaceDisabled: boolean;
   markdownPreview: boolean;
   setFont: (fontId: string) => void;
-  cycleFontSize: () => void;
+  setFontSize: (size: number) => void;
   toggleBackspace: () => void;
   toggleMarkdownPreview: () => void;
 }
@@ -34,7 +33,7 @@ export const usePrefs = create<PrefsState>()(
       backspaceDisabled: false,
       markdownPreview: false,
       setFont: (fontId) => set({ fontId }),
-      cycleFontSize: () => set((s) => ({ fontSize: nextFontSize(s.fontSize) })),
+      setFontSize: (fontSize) => set({ fontSize }),
       toggleBackspace: () =>
         set((s) => ({ backspaceDisabled: !s.backspaceDisabled })),
       toggleMarkdownPreview: () =>
@@ -132,6 +131,27 @@ interface WriterState {
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
 let pendingSave: Entry | null = null;
 
+// Which entry was open last, so a reload resumes where the writer left off
+// instead of minting a fresh entry every visit.
+const LAST_ENTRY_KEY = "freewrite:last-entry";
+
+function rememberEntry(id: string | null) {
+  try {
+    if (id) localStorage.setItem(LAST_ENTRY_KEY, id);
+    else localStorage.removeItem(LAST_ENTRY_KEY);
+  } catch {
+    // Storage can be unavailable (private mode) — resuming is best-effort.
+  }
+}
+
+function lastEntryId(): string | null {
+  try {
+    return localStorage.getItem(LAST_ENTRY_KEY);
+  } catch {
+    return null;
+  }
+}
+
 function flushPending() {
   if (saveTimeout) {
     clearTimeout(saveTimeout);
@@ -164,22 +184,16 @@ export const useWriter = create<WriterState>()((set, get) => ({
       await putEntry(welcome);
       entries.push(welcome);
       currentId = welcome.id;
-    } else if (entries.length === 1 && isWelcomeEntry(entries[0].content)) {
-      currentId = entries[0].id;
     } else {
-      const todayEmpty = entries.find(
-        (e) => !e.content.trim() && isToday(e.createdAt)
-      );
-      if (todayEmpty) {
-        currentId = todayEmpty.id;
-      } else {
-        const fresh = createEntry();
-        await putEntry(fresh);
-        entries.unshift(fresh);
-        currentId = fresh.id;
-      }
+      // Resume whatever was open last; fall back to the newest entry. New
+      // entries only come from the New Entry button, never from a reload.
+      const last = lastEntryId();
+      currentId = entries.some((e) => e.id === last)
+        ? last
+        : entries[0].id;
     }
 
+    rememberEntry(currentId);
     set({ entries, currentId, placeholder: randomPlaceholder(), ready: true });
     void purgeTombstones();
   },
@@ -203,6 +217,7 @@ export const useWriter = create<WriterState>()((set, get) => ({
       } else {
         currentId = entries[0].id;
       }
+      rememberEntry(currentId);
     }
     set({ entries, currentId });
   },
@@ -224,6 +239,7 @@ export const useWriter = create<WriterState>()((set, get) => ({
     flushPending();
     const fresh = createEntry();
     void putEntry(fresh);
+    rememberEntry(fresh.id);
     set((s) => ({
       entries: [fresh, ...s.entries],
       currentId: fresh.id,
@@ -234,6 +250,7 @@ export const useWriter = create<WriterState>()((set, get) => ({
 
   select: (id) => {
     flushPending();
+    rememberEntry(id);
     set({ currentId: id });
   },
 
@@ -265,6 +282,7 @@ export const useWriter = create<WriterState>()((set, get) => ({
         entries.push(fresh);
         currentId = fresh.id;
       }
+      rememberEntry(currentId);
     }
     set({ entries, currentId });
   },

@@ -179,6 +179,26 @@
     border-radius: 2px;
     margin-inline: auto;
   }
+  & video {
+    max-width: 100%;
+    border-radius: 2px;
+  }
+  & iframe {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border: 0;
+    border-radius: var(--radius);
+  }
+  /* GFM task list items: the checkbox replaces the bullet. Loose lists wrap
+     item content in <p>, so match the checkbox through either shape. */
+  & li:has(> input[type="checkbox"], > p > input[type="checkbox"]) {
+    list-style: none;
+    margin-left: -1.5em;
+  }
+  & li input[type="checkbox"] {
+    margin-right: 0.5em;
+    accent-color: var(--color-foreground);
+  }
   & figcaption {
     font-size: 0.8em;
     text-align: center;

@@ -9,6 +9,39 @@ import { JsonTree } from "@/components/json-tree";
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+const escapeAttr = (s: string) => escapeHtml(s).replace(/"/g, "&quot;");
+
+type Media =
+  | { tag: "image" | "video"; src: string }
+  | { tag: "youtube"; id: string };
+
+// Direct media file links plus YouTube pages; anything else stays a link.
+// http(s) only — no javascript:/data: URLs sneaking into src attributes.
+function mediaFor(href: string): Media | null {
+  if (!/^https?:\/\//i.test(href)) return null;
+  const path = href.split(/[?#]/)[0].toLowerCase();
+  if (/\.(png|jpe?g|gif|webp|avif|svg|bmp)$/.test(path))
+    return { tag: "image", src: href };
+  if (/\.(mp4|webm|mov|m4v|ogv)$/.test(path))
+    return { tag: "video", src: href };
+  const yt = href.match(
+    /^https?:\/\/(?:www\.)?(?:youtube(?:-nocookie)?\.com\/(?:watch\?[^#]*?v=|shorts\/|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/i
+  );
+  if (yt) return { tag: "youtube", id: yt[1] };
+  return null;
+}
+
+function mediaHtml(media: Media): string {
+  switch (media.tag) {
+    case "image":
+      return `<img src="${escapeAttr(media.src)}" alt="" loading="lazy" />`;
+    case "video":
+      return `<video src="${escapeAttr(media.src)}" controls playsinline preload="metadata"></video>`;
+    case "youtube":
+      return `<iframe src="https://www.youtube-nocookie.com/embed/${media.id}" title="YouTube video" allow="encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+  }
+}
+
 const marked = new Marked({
   gfm: true,
   // Freewriting treats a single newline as a line break, so the preview
@@ -27,6 +60,18 @@ const marked = new Marked({
         ? hljs.highlight(text, { language: known }).value
         : escapeHtml(text);
       return `<pre><code class="hljs${known ? ` language-${known}` : ""}">${body}</code></pre>\n`;
+    },
+    // A pasted bare URL (text === href) to an image, video file, or YouTube
+    // page embeds the media itself; a deliberately labeled link stays a link.
+    link({ href, text }) {
+      if (text !== href) return false;
+      const media = mediaFor(href);
+      return media ? mediaHtml(media) : false;
+    },
+    // ![](movie.mp4) — image syntax pointing at a video renders a player.
+    image({ href }) {
+      const media = mediaFor(href);
+      return media && media.tag !== "image" ? mediaHtml(media) : false;
     },
   },
 });
