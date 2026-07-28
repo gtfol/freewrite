@@ -28,7 +28,9 @@ const itemClass =
 const optionClass =
   "w-full rounded-md px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-accent";
 
-function Dot() {
+// Exported so anything rendered into the nav — the storage line — separates
+// its terms with the same mark rather than an approximation of it.
+export function Dot() {
   return <span className="text-muted-foreground/40 select-none">•</span>;
 }
 
@@ -159,8 +161,8 @@ export function ReaderNav({
   onDelete?: () => void;
   trim?: TrimControls;
   listen?: ListenControls;
-  // Rendered inside the nav, above the links — the audiobook transport sits
-  // here so the two never fight over the bottom of the screen.
+  // Rendered inside the nav, above the links — the audiobook transport and
+  // the storage line sit here so nothing fights over the bottom of the screen.
   banner?: React.ReactNode;
 }) {
   const { theme, setTheme } = useTheme();

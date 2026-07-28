@@ -294,8 +294,12 @@ export class AudiobookGenerator {
     void this.drain();
   }
 
+  // Removing a download drops the intent that came with it: carrying on
+  // synthesizing the whole article would only fill the cache with audio the
+  // collector is now free to evict.
   async unpin(): Promise<void> {
     this.book.pinned = false;
+    this.wantAll = false;
     await putAudiobook(this.book);
   }
 

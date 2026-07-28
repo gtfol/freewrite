@@ -17,6 +17,7 @@ import {
   localKeys,
   localPut,
 } from "@/lib/db";
+import { audioSizes, bookBytes, type AudioSizes } from "@/lib/tts/size";
 import type { AudioRecord, Audiobook } from "@/lib/tts/types";
 
 // Soft ceiling for generated audio. At ~3KB/s of Opus this is many hours of
@@ -27,6 +28,9 @@ const BUDGET_BYTES = 400 * 1024 * 1024;
 // whatever the budget says — the writing side of the app must never fail to
 // save an entry because the reader filled the disk.
 const QUOTA_SHARE = 0.5;
+// Where @diffusionstudio/vits-web keeps the voice models, as one flat OPFS
+// directory of `<voiceId>.onnx` and `<voiceId>.onnx.json`.
+const VOICE_DIR = "piper";
 
 export const getAudiobook = (articleId: string) =>
   localGet<Audiobook>(AUDIOBOOKS, articleId);
@@ -60,10 +64,6 @@ export async function deleteAudiobook(articleId: string): Promise<void> {
   await collectGarbage();
 }
 
-function bookBytes(book: Audiobook): number {
-  return book.chunks.reduce((sum, chunk) => sum + (chunk.bytes ?? 0), 0);
-}
-
 async function budget(): Promise<number> {
   if (typeof navigator === "undefined" || !navigator.storage?.estimate) {
     return BUDGET_BYTES;
@@ -88,6 +88,71 @@ export async function requestPersistence(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export interface StorageReport extends AudioSizes {
+  // Voice models live in OPFS rather than IndexedDB, are shared by every
+  // article, and are deliberately outside the audio GC. Reported apart from
+  // audio because a ~60MB model is the usual answer to "why is this site
+  // using 200MB", and because clearing the cache never touches one.
+  voiceBytes: number;
+}
+
+// vits-web says which voices are stored but not what they cost, and asking
+// huggingface for the sizes would be a network round trip to render a number.
+// The models are plain files, so measure them where they sit.
+async function voiceBytes(): Promise<number> {
+  if (typeof navigator === "undefined" || !navigator.storage?.getDirectory) {
+    return 0;
+  }
+  try {
+    const vits = await import("@diffusionstudio/vits-web");
+    const stored = await vits.stored();
+    if (stored.length === 0) return 0;
+
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle(VOICE_DIR);
+    const sizes = await Promise.all(
+      stored
+        .flatMap((id) => [`${id}.onnx`, `${id}.onnx.json`])
+        .map(async (name) => {
+          try {
+            return (await (await dir.getFileHandle(name)).getFile()).size;
+          } catch {
+            return 0;
+          }
+        })
+    );
+    return sizes.reduce((sum, size) => sum + size, 0);
+  } catch {
+    // Nothing has been downloaded yet, or the browser has no OPFS.
+    return 0;
+  }
+}
+
+export async function storageReport(): Promise<StorageReport> {
+  const books = await localGetAll<Audiobook>(AUDIOBOOKS);
+  return { ...audioSizes(books), voiceBytes: await voiceBytes() };
+}
+
+// Clearing the cache never touches a download. Dropping the unpinned
+// manifests is the whole operation — the chunk sweep below reclaims whatever
+// they were the last reference to, and a sentence a downloaded article still
+// points at survives it.
+export async function clearAudioCache(): Promise<void> {
+  const books = await localGetAll<Audiobook>(AUDIOBOOKS);
+  const unpinned = books
+    .filter((book) => !book.pinned)
+    .map((book) => book.articleId);
+  if (unpinned.length > 0) await localDeleteMany(AUDIOBOOKS, unpinned);
+  await collectGarbage();
+}
+
+// Voice models are shared by every article and sit outside the collector, so
+// they only ever go on an explicit ask. The next listen downloads them again.
+export async function removeVoices(): Promise<void> {
+  const vits = await import("@diffusionstudio/vits-web");
+  await vits.flush();
 }
 
 // Three passes, cheapest first:

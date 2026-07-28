@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { ReaderNav } from "@/components/reader-nav";
+import { StorageLine } from "@/components/storage-line";
 import { useMounted } from "@/hooks/use-mounted";
 import {
   articleDate,
@@ -344,7 +345,7 @@ export default function ReadPage() {
         </ul>
       </div>
 
-      <ReaderNav />
+      <ReaderNav banner={<StorageLine />} />
 
       <AlertDialog
         open={deleting !== null}

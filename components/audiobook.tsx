@@ -289,8 +289,15 @@ export function Audiobook({
     setGeneration({ status: "idle" });
   };
 
-  const download = () => {
-    void generatorRef.current?.pin().then(() => setPinned(true));
+  // Removing a download only unpins it. The audio stays playable and stays in
+  // the cache; it is simply evictable again, which is what the collector needs
+  // to be able to reclaim it.
+  const toggleDownload = () => {
+    const generator = generatorRef.current;
+    if (!generator) return;
+    const next = !pinned;
+    setPinned(next);
+    void (next ? generator.pin() : generator.unpin());
   };
 
   const scrub = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -394,13 +401,8 @@ export function Audiobook({
             </PopoverContent>
           </Popover>
 
-          <button
-            type="button"
-            onClick={download}
-            disabled={pinned}
-            className={`${itemClass} disabled:opacity-40`}
-          >
-            {pinned ? "Downloaded" : "Download"}
+          <button type="button" onClick={toggleDownload} className={itemClass}>
+            {pinned ? "Downloaded · Remove" : "Download"}
           </button>
 
           {status && (
