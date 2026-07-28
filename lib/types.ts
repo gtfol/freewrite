@@ -8,9 +8,8 @@ export interface Entry {
 
 export type ExtractSource = "direct" | "render" | "paste";
 
-// "archive" only survives as a label for articles saved while the
-// archive.ph fallback existed. "freedium" marks member-only Medium stories
-// fetched through the freedium mirror.
+// "archive" and "freedium" only survive as labels for articles saved while
+// those fallbacks existed; nothing produces them now.
 export type ArticleVia = "archive" | "render" | "paste" | "freedium" | null;
 
 // A reader annotation: the exact quoted text plus a little surrounding
@@ -101,7 +100,4 @@ export interface ExtractedArticle {
   excerpt: string | null;
   content: string;
   wordCount: number;
-  // Set when the server took a detour the client didn't ask for (e.g. a
-  // locked Medium story served through freedium); wins over the source label.
-  via?: ArticleVia;
 }
