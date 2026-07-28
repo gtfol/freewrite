@@ -29,7 +29,7 @@ interface IndexedNode {
   start: number;
 }
 
-interface TextIndex {
+export interface TextIndex {
   nodes: IndexedNode[];
   raw: string;
   norm: string;
@@ -39,13 +39,16 @@ interface TextIndex {
   rawToNorm: number[];
 }
 
-export function buildTextIndex(root: HTMLElement): TextIndex {
+// `opaque` widens the skip list for callers with their own idea of what isn't
+// text — read-aloud also skips code blocks and captions. Anchoring keeps the
+// default, so highlight offsets are unaffected.
+export function buildTextIndex(root: HTMLElement, opaque = OPAQUE): TextIndex {
   const nodes: IndexedNode[] = [];
   let raw = "";
 
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: (node) =>
-      (node as Text).parentElement?.closest(OPAQUE)
+      (node as Text).parentElement?.closest(opaque)
         ? NodeFilter.FILTER_REJECT
         : NodeFilter.FILTER_ACCEPT,
   });

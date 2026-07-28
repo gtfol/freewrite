@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@diffusionstudio/vits-web": "^1.0.3",
     "@mozilla/readability": "^0.6.0",
     "@radix-ui/react-alert-dialog": "^1.1.23",
     "@radix-ui/react-popover": "^1.1.23",
@@ -20,6 +21,7 @@
     "clsx": "^2.1.1",
     "highlight.js": "^11.11.1",
     "katex": "^0.18.1",
+    "kokoro-js": "^1.2.1",
     "linkedom": "^0.18.13",
     "lucide-react": "^1.27.0",
     "marked": "^18.0.7",

@@ -16,6 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Audiobook } from "@/components/audiobook";
 import { HighlightLayer } from "@/components/highlight-layer";
 import { ReaderNav } from "@/components/reader-nav";
 import {
@@ -47,6 +48,9 @@ export default function ArticlePage({
   const [article, setArticle] = useState<Article | null | undefined>(undefined);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [trim, setTrim] = useState<TrimSession | null>(null);
+  // Mounting the transport is what loads the model and starts synthesis, so
+  // an article nobody asks to hear costs nothing.
+  const [listening, setListening] = useState(false);
   const bodyRef = useRef<HTMLElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -270,6 +274,19 @@ export default function ArticlePage({
         article={article}
         onDelete={() => setConfirmingDelete(true)}
         trim={trimControls}
+        listen={{
+          active: listening,
+          onToggle: () => setListening((on) => !on),
+        }}
+        banner={
+          listening && !trim ? (
+            <Audiobook
+              article={article}
+              contentRef={contentRef}
+              wrapRef={wrapRef}
+            />
+          ) : null
+        }
       />
 
       <AlertDialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>

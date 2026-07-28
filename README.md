@@ -13,6 +13,14 @@ npm install
 npm run dev
 ```
 
+## listen
+
+saved articles can be read aloud. the word being spoken is highlighted as it goes, and clicking any line jumps the audio there.
+
+speech is generated on your device — kokoro where webgpu is available, piper on cpu where it isn't — so no api key, and the article text never leaves the browser. the voice model is fetched once (huggingface for the weights, a cdn for the wasm runtime) and cached; after that it works offline.
+
+audio is stored per sentence, keyed by a hash of the text, so trimming an article only invalidates the sentences you removed. it's kept as opus in indexeddb, evicted least-recently-played once it outgrows its budget, and deliberately never synced — re-generating on another device is cheaper than shipping megabytes around. `Download` pins an article so eviction leaves it alone.
+
 ## sync (optional)
 
 fully local by default. to sync across devices:
@@ -33,4 +41,4 @@ links are unlisted (random 128-bit ids), noindexed, and expire on their own. the
 
 ## stack
 
-next.js · tailwind · shadcn/ui · zustand · indexeddb · better auth + supabase (optional sync)
+next.js · tailwind · shadcn/ui · zustand · indexeddb · kokoro + piper via onnx runtime web (on-device tts) · better auth + supabase (optional sync)

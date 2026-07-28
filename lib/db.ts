@@ -1,12 +1,20 @@
 import type { Article, Entry } from "@/lib/types";
 
 const DB_NAME = "freewrite";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 const ENTRIES = "entries";
 const ARTICLES = "articles";
 const OUTBOX = "outbox";
 const SYNCMETA = "syncmeta";
+
+// Device-local stores: generated audio and its manifests. Nothing here ever
+// calls markDirty, so none of it reaches the outbox, the manifest, or the
+// digest — an audiobook is a cache, not a record, and re-deriving it on
+// another device is cheaper than shipping megabytes of Opus around.
+export const AUDIO = "audio";
+export const AUDIOBOOKS = "audiobooks";
+export type LocalStore = typeof AUDIO | typeof AUDIOBOOKS;
 
 const TOMBSTONE_TTL = 30 * 24 * 60 * 60 * 1000;
 
@@ -63,6 +71,12 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(SYNCMETA)) {
         db.createObjectStore(SYNCMETA, { keyPath: "key" });
+      }
+      if (!db.objectStoreNames.contains(AUDIO)) {
+        db.createObjectStore(AUDIO, { keyPath: "key" });
+      }
+      if (!db.objectStoreNames.contains(AUDIOBOOKS)) {
+        db.createObjectStore(AUDIOBOOKS, { keyPath: "articleId" });
       }
     };
 
@@ -229,6 +243,37 @@ export const enqueueOutbox = (collection: Collection, id: string) =>
 export const getSyncMeta = (key: string) => get<SyncMeta>(SYNCMETA, key);
 export const putSyncMeta = (meta: SyncMeta) => put(SYNCMETA, meta);
 export const listSyncMeta = () => getAll<SyncMeta>(SYNCMETA);
+
+// Raw access to the device-local stores, for lib/tts. Deliberately separate
+// from the record helpers above: those stamp updatedAt and mark dirty, and
+// audio must do neither.
+export const localGet = <T>(store: LocalStore, key: string) => get<T>(store, key);
+export const localGetAll = <T>(store: LocalStore) => getAll<T>(store);
+export const localPut = <T>(store: LocalStore, value: T) => put(store, value);
+
+export async function localKeys(store: LocalStore): Promise<string[]> {
+  const db = await openDb();
+  const tx = db.transaction(store, "readonly");
+  const keys = await requestToPromise(tx.objectStore(store).getAllKeys());
+  return keys.map(String);
+}
+
+// One transaction for the whole sweep — GC can touch hundreds of chunks.
+export async function localDeleteMany(
+  store: LocalStore,
+  keys: string[]
+): Promise<void> {
+  if (keys.length === 0) return;
+  const db = await openDb();
+  const tx = db.transaction(store, "readwrite");
+  const objectStore = tx.objectStore(store);
+  for (const key of keys) objectStore.delete(key);
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
 
 export async function purgeTombstones(): Promise<void> {
   const cutoff = Date.now() - TOMBSTONE_TTL;
