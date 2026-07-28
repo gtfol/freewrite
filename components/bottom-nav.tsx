@@ -6,11 +6,11 @@ import { Clock, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { ChatPopover } from "@/components/chat-popover";
+import { FontPopover } from "@/components/font-popover";
 import { SharePopover } from "@/components/share-popover";
 import { SyncPopover } from "@/components/sync-popover";
 import { TimerButton } from "@/components/timer-button";
 import { useFullscreen } from "@/hooks/use-fullscreen";
-import { fontById, randomFont, STANDARD_FONTS } from "@/lib/fonts";
 import { usePrefs, useTimer, useWriter } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -37,12 +37,8 @@ function Dot() {
 }
 
 export function BottomNav() {
-  const fontId = usePrefs((s) => s.fontId);
-  const fontSize = usePrefs((s) => s.fontSize);
   const backspaceDisabled = usePrefs((s) => s.backspaceDisabled);
   const markdownPreview = usePrefs((s) => s.markdownPreview);
-  const setFont = usePrefs((s) => s.setFont);
-  const cycleFontSize = usePrefs((s) => s.cycleFontSize);
   const toggleBackspace = usePrefs((s) => s.toggleBackspace);
   const toggleMarkdownPreview = usePrefs((s) => s.toggleMarkdownPreview);
 
@@ -55,9 +51,6 @@ export function BottomNav() {
   const fullscreen = useFullscreen();
   const [hovered, setHovered] = useState(false);
 
-  const currentFont = fontById(fontId);
-  const isRandomFont = !STANDARD_FONTS.some((f) => f.id === fontId);
-
   return (
     <nav
       onMouseEnter={() => setHovered(true)}
@@ -69,26 +62,7 @@ export function BottomNav() {
     >
       <div className="mx-auto flex max-w-[1000px] flex-wrap items-center justify-center gap-x-3 gap-y-1 px-6 py-4 text-[13px] md:justify-between">
         <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
-          <NavButton onClick={cycleFontSize} title="Font size">
-            {fontSize}px
-          </NavButton>
-          <Dot />
-          {STANDARD_FONTS.map((font) => (
-            <NavButton
-              key={font.id}
-              active={fontId === font.id}
-              onClick={() => setFont(font.id)}
-            >
-              {font.label}
-            </NavButton>
-          ))}
-          <NavButton
-            active={isRandomFont}
-            onClick={() => setFont(randomFont(fontId).id)}
-            title="Random font"
-          >
-            {isRandomFont ? `Random [${currentFont.label}]` : "Random"}
-          </NavButton>
+          <FontPopover />
         </div>
 
         <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
@@ -121,9 +95,9 @@ export function BottomNav() {
           <NavButton
             active={markdownPreview}
             onClick={toggleMarkdownPreview}
-            title="Side-by-side markdown preview"
+            title="Side-by-side preview"
           >
-            Markdown
+            Preview
           </NavButton>
           <Dot />
           {fullscreen.supported && (

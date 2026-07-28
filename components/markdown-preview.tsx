@@ -2,12 +2,68 @@
 
 import hljs from "highlight.js/lib/common";
 import { Marked } from "marked";
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { JsonTree } from "@/components/json-tree";
+import { Lightbox, type LightboxMedia } from "@/components/lightbox";
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+const escapeAttr = (s: string) => escapeHtml(s).replace(/"/g, "&quot;");
+
+type Media =
+  | { tag: "image" | "video"; src: string }
+  | { tag: "youtube"; id: string };
+
+// Direct media file links plus YouTube pages; anything else stays a link.
+// http(s) only — no javascript:/data: URLs sneaking into src attributes.
+function mediaFor(href: string): Media | null {
+  if (!/^https?:\/\//i.test(href)) return null;
+  const path = href.split(/[?#]/)[0].toLowerCase();
+  if (/\.(png|jpe?g|gif|webp|avif|svg|bmp)$/.test(path))
+    return { tag: "image", src: href };
+  if (/\.(mp4|webm|mov|m4v|ogv)$/.test(path))
+    return { tag: "video", src: href };
+  const yt = href.match(
+    /^https?:\/\/(?:www\.)?(?:youtube(?:-nocookie)?\.com\/(?:watch\?[^#]*?v=|shorts\/|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/i
+  );
+  if (yt) return { tag: "youtube", id: yt[1] };
+  return null;
+}
+
+// Everything embeds as a modest thumbnail that opens the lightbox on click —
+// media stays a reference alongside the writing rather than taking the page
+// over. Video renders its own first frame; YouTube uses its poster image, so
+// no third-party frame loads until the writer actually asks for it.
+function thumb(kind: Media["tag"], src: string, inner: string): string {
+  return (
+    `<span class="media-thumb" data-media="${kind}" data-src="${escapeAttr(src)}"` +
+    ` role="button" tabindex="0" title="Click to expand">${inner}` +
+    `<span class="media-play" aria-hidden="true"></span></span>`
+  );
+}
+
+function mediaHtml(media: Media): string {
+  switch (media.tag) {
+    case "image":
+      return `<img src="${escapeAttr(media.src)}" alt="" loading="lazy" title="Click to expand" />`;
+    case "video":
+      return thumb(
+        "video",
+        media.src,
+        `<video src="${escapeAttr(media.src)}" preload="metadata" muted playsinline></video>`
+      );
+    case "youtube":
+      // mqdefault is the true 16:9 frame; hqdefault is a 4:3 image with
+      // black bars baked around widescreen video.
+      return thumb(
+        "youtube",
+        media.id,
+        `<img src="https://i.ytimg.com/vi/${media.id}/mqdefault.jpg" alt="" loading="lazy" />`
+      );
+  }
+}
 
 const marked = new Marked({
   gfm: true,
@@ -27,6 +83,18 @@ const marked = new Marked({
         ? hljs.highlight(text, { language: known }).value
         : escapeHtml(text);
       return `<pre><code class="hljs${known ? ` language-${known}` : ""}">${body}</code></pre>\n`;
+    },
+    // A pasted bare URL (text === href) to an image, video file, or YouTube
+    // page embeds the media itself; a deliberately labeled link stays a link.
+    link({ href, text }) {
+      if (text !== href) return false;
+      const media = mediaFor(href);
+      return media ? mediaHtml(media) : false;
+    },
+    // ![](movie.mp4) — image syntax pointing at a video renders a player.
+    image({ href }) {
+      const media = mediaFor(href);
+      return media && media.tag !== "image" ? mediaHtml(media) : false;
     },
   },
 });
@@ -149,31 +217,66 @@ export function MarkdownPreview({
   fontSize: number;
 }) {
   const segments = useMemo(() => segment(content), [content]);
+  const [zoomed, setZoomed] = useState<LightboxMedia | null>(null);
+
+  // The rendered markdown is injected HTML, so media clicks are caught by
+  // delegation rather than per-element handlers.
+  const openFrom = useCallback((target: EventTarget | null): boolean => {
+    if (!(target instanceof Element)) return false;
+    const media = target.closest<HTMLElement>("[data-media]");
+    if (media?.dataset.media && media.dataset.src) {
+      setZoomed({
+        kind: media.dataset.media as LightboxMedia["kind"],
+        src: media.dataset.src,
+      });
+      return true;
+    }
+    const image = target.closest("img");
+    if (image) {
+      setZoomed({ kind: "image", src: image.src });
+      return true;
+    }
+    return false;
+  }, []);
 
   return (
-    <div className="mx-auto max-w-[650px] space-y-5 px-6 pt-14 pb-28">
-      {segments.length === 0 && (
-        <p
-          className="text-muted-foreground/50"
-          style={{ fontFamily, fontSize: `${fontSize}px`, lineHeight: 1.7 }}
-        >
-          Markdown preview
-        </p>
-      )}
-      {segments.map((seg, i) =>
-        seg.kind === "md" ? (
-          <div
-            key={i}
-            className="reader break-words"
+    <>
+      <div
+        onClick={(e) => {
+          if (openFrom(e.target)) e.preventDefault();
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          if (openFrom(e.target)) e.preventDefault();
+        }}
+        className="mx-auto max-w-[650px] space-y-5 px-6 pt-14 pb-28"
+      >
+        {segments.length === 0 && (
+          <p
+            className="text-muted-foreground/50"
             style={{ fontFamily, fontSize: `${fontSize}px`, lineHeight: 1.7 }}
-            dangerouslySetInnerHTML={{
-              __html: marked.parse(seg.text, { async: false }),
-            }}
-          />
-        ) : (
-          <JsonTree key={i} value={seg.value} />
-        )
+          >
+            Preview
+          </p>
+        )}
+        {segments.map((seg, i) =>
+          seg.kind === "md" ? (
+            <div
+              key={i}
+              className="reader preview break-words"
+              style={{ fontFamily, fontSize: `${fontSize}px`, lineHeight: 1.7 }}
+              dangerouslySetInnerHTML={{
+                __html: marked.parse(seg.text, { async: false }),
+              }}
+            />
+          ) : (
+            <JsonTree key={i} value={seg.value} />
+          )
+        )}
+      </div>
+      {zoomed && (
+        <Lightbox media={zoomed} onClose={() => setZoomed(null)} />
       )}
-    </div>
+    </>
   );
 }
