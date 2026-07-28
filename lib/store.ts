@@ -14,15 +14,20 @@ import { DEFAULT_FONT_ID, DEFAULT_FONT_SIZE } from "@/lib/fonts";
 import { clearShareRecord, getShareRecord } from "@/lib/shares";
 import type { Entry } from "@/lib/types";
 
+// "split" is the side-by-side pane; "full" hands the whole writing area to the
+// preview. Narrow screens have no room for split, so the cycle skips it there
+// — see cyclePreview.
+export type PreviewMode = "off" | "split" | "full";
+
 interface PrefsState {
   fontId: string;
   fontSize: number;
   backspaceDisabled: boolean;
-  markdownPreview: boolean;
+  previewMode: PreviewMode;
   setFont: (fontId: string) => void;
   setFontSize: (size: number) => void;
   toggleBackspace: () => void;
-  toggleMarkdownPreview: () => void;
+  cyclePreview: (canSplit: boolean) => void;
 }
 
 export const usePrefs = create<PrefsState>()(
@@ -31,15 +36,48 @@ export const usePrefs = create<PrefsState>()(
       fontId: DEFAULT_FONT_ID,
       fontSize: DEFAULT_FONT_SIZE,
       backspaceDisabled: false,
-      markdownPreview: false,
+      previewMode: "off",
       setFont: (fontId) => set({ fontId }),
       setFontSize: (fontSize) => set({ fontSize }),
       toggleBackspace: () =>
         set((s) => ({ backspaceDisabled: !s.backspaceDisabled })),
-      toggleMarkdownPreview: () =>
-        set((s) => ({ markdownPreview: !s.markdownPreview })),
+      // Where split is unavailable the cycle is off → full → off, so every
+      // press changes something visible rather than appearing to do nothing.
+      cyclePreview: (canSplit) =>
+        set((s) => ({
+          previewMode:
+            s.previewMode === "off"
+              ? canSplit
+                ? "split"
+                : "full"
+              : s.previewMode === "split"
+                ? "full"
+                : "off",
+        })),
     }),
-    { name: "freewrite:prefs" }
+    {
+      name: "freewrite:prefs",
+      // v0 stored a markdownPreview boolean. Without this, everyone who had
+      // preview on silently loses the preference.
+      version: 1,
+      // Keyed on the missing field rather than on `version === 0`, so it stays
+      // correct if the version is ever bumped again for an unrelated reason.
+      // (A stored value carrying no numeric version at all is skipped by
+      // zustand before migrate is reached; it falls back to the default "off",
+      // which is harmless — persist has always written a version.)
+      migrate: (persisted) => {
+        const state = persisted as Partial<PrefsState> & {
+          markdownPreview?: boolean;
+        };
+        if (state.previewMode === undefined) {
+          return {
+            ...state,
+            previewMode: state.markdownPreview ? "split" : "off",
+          } as PrefsState;
+        }
+        return state as PrefsState;
+      },
+    }
   )
 );
 

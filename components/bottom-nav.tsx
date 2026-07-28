@@ -11,6 +11,7 @@ import { SharePopover } from "@/components/share-popover";
 import { SyncPopover } from "@/components/sync-popover";
 import { TimerButton } from "@/components/timer-button";
 import { useFullscreen } from "@/hooks/use-fullscreen";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { usePrefs, useTimer, useWriter } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -38,9 +39,11 @@ function Dot() {
 
 export function BottomNav() {
   const backspaceDisabled = usePrefs((s) => s.backspaceDisabled);
-  const markdownPreview = usePrefs((s) => s.markdownPreview);
+  const previewMode = usePrefs((s) => s.previewMode);
   const toggleBackspace = usePrefs((s) => s.toggleBackspace);
-  const toggleMarkdownPreview = usePrefs((s) => s.toggleMarkdownPreview);
+  const cyclePreview = usePrefs((s) => s.cyclePreview);
+  // Matches the md breakpoint the split pane renders at.
+  const canSplit = useMediaQuery("(min-width: 768px)");
 
   const running = useTimer((s) => s.running);
   const addEntry = useWriter((s) => s.addEntry);
@@ -93,9 +96,17 @@ export function BottomNav() {
           </NavButton>
           <Dot />
           <NavButton
-            active={markdownPreview}
-            onClick={toggleMarkdownPreview}
-            title="Side-by-side preview"
+            active={previewMode !== "off"}
+            onClick={() => cyclePreview(canSplit)}
+            title={
+              previewMode === "off"
+                ? canSplit
+                  ? "Side-by-side preview"
+                  : "Full preview"
+                : previewMode === "split"
+                  ? "Switch to full preview"
+                  : "Back to writing"
+            }
           >
             Preview
           </NavButton>

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { MarkdownPreview } from "@/components/markdown-preview";
 import { fontById } from "@/lib/fonts";
 import { currentEntry, usePrefs, useWriter } from "@/lib/store";
+import { cn } from "@/lib/utils";
 
 // indent, bullet | number+punct, spacing, optional checkbox, content.
 const LIST_ITEM = /^(\s*)(?:([-*+])|(\d+)([.)]))(\s+)(\[[ xX]\]\s+)?(.*)$/;
@@ -71,14 +72,16 @@ export function Editor() {
   const fontId = usePrefs((s) => s.fontId);
   const fontSize = usePrefs((s) => s.fontSize);
   const backspaceDisabled = usePrefs((s) => s.backspaceDisabled);
-  const markdownPreview = usePrefs((s) => s.markdownPreview);
+  const previewMode = usePrefs((s) => s.previewMode);
 
   const ref = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    ref.current?.focus();
-  }, [entry?.id, markdownPreview]);
+    // A hidden textarea can't take focus, and stealing it back on the way out
+    // of full preview is what restores the caret.
+    if (previewMode !== "full") ref.current?.focus();
+  }, [entry?.id, previewMode]);
 
   const applyPlan = useCallback(
     (el: HTMLTextAreaElement, plan: EditPlan) => {
@@ -151,7 +154,7 @@ export function Editor() {
       value={entry.content}
       onChange={(e) => setContent(e.target.value)}
       onKeyDown={onKeyDown}
-      onScroll={markdownPreview ? onScroll : undefined}
+      onScroll={previewMode === "split" ? onScroll : undefined}
       placeholder={placeholder}
       spellCheck={false}
       autoCorrect="off"
@@ -165,21 +168,36 @@ export function Editor() {
     />
   );
 
-  if (!markdownPreview) return textarea;
-
+  // One tree for all three modes, so the textarea is never unmounted: React
+  // would otherwise remount it on every toggle and drop the caret and scroll
+  // position with it. Full preview hides it rather than removing it.
   return (
     <div className="flex h-full">
-      <div className="h-full min-w-0 flex-1">{textarea}</div>
       <div
-        ref={previewRef}
-        className="no-scrollbar hidden h-full min-w-0 flex-1 overflow-y-auto border-l md:block"
+        className={cn(
+          "h-full min-w-0 flex-1",
+          previewMode === "full" && "hidden"
+        )}
       >
-        <MarkdownPreview
-          content={entry.content}
-          fontFamily={font.stack}
-          fontSize={fontSize}
-        />
+        {textarea}
       </div>
+      {previewMode !== "off" && (
+        <div
+          ref={previewRef}
+          className={cn(
+            "no-scrollbar h-full min-w-0 flex-1 overflow-y-auto",
+            // Side by side needs the divider and only exists once there's room
+            // for two columns; full preview always shows, at any width.
+            previewMode === "split" ? "hidden border-l md:block" : "block"
+          )}
+        >
+          <MarkdownPreview
+            content={entry.content}
+            fontFamily={font.stack}
+            fontSize={fontSize}
+          />
+        </div>
+      )}
     </div>
   );
 }
