@@ -179,16 +179,6 @@
     border-radius: 2px;
     margin-inline: auto;
   }
-  & video {
-    max-width: 100%;
-    border-radius: 2px;
-  }
-  & iframe {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    border: 0;
-    border-radius: var(--radius);
-  }
   /* GFM task list items: the checkbox replaces the bullet. Loose lists wrap
      item content in <p>, so match the checkbox through either shape. */
   & li:has(> input[type="checkbox"], > p > input[type="checkbox"]) {
@@ -248,6 +238,76 @@
   & [data-hl-chip] svg {
     width: 0.75em;
     height: 0.75em;
+  }
+}
+
+/* Embedded media in the side-by-side preview. Everything renders as a modest
+   thumbnail — the writing stays the focus — and opens full size in the
+   lightbox on click. Scoped to .preview so the article reader, where images
+   are the content, keeps rendering them full width. */
+.preview {
+  --thumb-height: 200px;
+
+  /* Embeds sit on their own line rather than on the text baseline, so a
+     "Video:" style label stays above its thumbnail instead of beside it. */
+  & img {
+    display: block;
+    max-height: var(--thumb-height);
+    width: auto;
+    margin-inline: 0;
+    margin-block: 0.5em;
+    border-radius: var(--radius);
+    cursor: zoom-in;
+    transition: opacity 150ms;
+  }
+  & img:hover {
+    opacity: 0.85;
+  }
+  & .media-thumb {
+    position: relative;
+    display: block;
+    width: fit-content;
+    margin-block: 0.5em;
+    overflow: hidden;
+    border-radius: var(--radius);
+    background: var(--color-muted);
+    line-height: 0;
+    cursor: zoom-in;
+    /* Keeps a video/poster tile recognizable even before it loads. */
+    min-width: 160px;
+    min-height: 90px;
+  }
+  & .media-thumb:hover .media-play,
+  & .media-thumb:focus-visible .media-play {
+    background: oklch(0 0 0 / 45%);
+  }
+  & .media-thumb > img,
+  & .media-thumb > video {
+    display: block;
+    max-height: var(--thumb-height);
+    width: auto;
+    margin: 0;
+    border-radius: 0;
+    /* Clicks belong to the wrapper — a bare <video> would swallow them. */
+    pointer-events: none;
+  }
+  & .media-play {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: oklch(0 0 0 / 25%);
+    transition: background-color 150ms;
+  }
+  /* Play triangle, drawn rather than shipped as an icon font. */
+  & .media-play::after {
+    content: "";
+    border-style: solid;
+    border-width: 9px 0 9px 15px;
+    border-color: transparent transparent transparent white;
+    filter: drop-shadow(0 1px 2px oklch(0 0 0 / 50%));
+    margin-left: 3px;
   }
 }
 

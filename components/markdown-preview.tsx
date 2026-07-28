@@ -2,9 +2,10 @@
 
 import hljs from "highlight.js/lib/common";
 import { Marked } from "marked";
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { JsonTree } from "@/components/json-tree";
+import { Lightbox, type LightboxMedia } from "@/components/lightbox";
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -31,14 +32,34 @@ function mediaFor(href: string): Media | null {
   return null;
 }
 
+// Everything embeds as a modest thumbnail that opens the lightbox on click —
+// media stays a reference alongside the writing rather than taking the page
+// over. Video renders its own first frame; YouTube uses its poster image, so
+// no third-party frame loads until the writer actually asks for it.
+function thumb(kind: Media["tag"], src: string, inner: string): string {
+  return (
+    `<span class="media-thumb" data-media="${kind}" data-src="${escapeAttr(src)}"` +
+    ` role="button" tabindex="0" title="Click to expand">${inner}` +
+    `<span class="media-play" aria-hidden="true"></span></span>`
+  );
+}
+
 function mediaHtml(media: Media): string {
   switch (media.tag) {
     case "image":
-      return `<img src="${escapeAttr(media.src)}" alt="" loading="lazy" />`;
+      return `<img src="${escapeAttr(media.src)}" alt="" loading="lazy" title="Click to expand" />`;
     case "video":
-      return `<video src="${escapeAttr(media.src)}" controls playsinline preload="metadata"></video>`;
+      return thumb(
+        "video",
+        media.src,
+        `<video src="${escapeAttr(media.src)}" preload="metadata" muted playsinline></video>`
+      );
     case "youtube":
-      return `<iframe src="https://www.youtube-nocookie.com/embed/${media.id}" title="YouTube video" allow="encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+      return thumb(
+        "youtube",
+        media.id,
+        `<img src="https://i.ytimg.com/vi/${media.id}/hqdefault.jpg" alt="" loading="lazy" />`
+      );
   }
 }
 
@@ -194,31 +215,66 @@ export function MarkdownPreview({
   fontSize: number;
 }) {
   const segments = useMemo(() => segment(content), [content]);
+  const [zoomed, setZoomed] = useState<LightboxMedia | null>(null);
+
+  // The rendered markdown is injected HTML, so media clicks are caught by
+  // delegation rather than per-element handlers.
+  const openFrom = useCallback((target: EventTarget | null): boolean => {
+    if (!(target instanceof Element)) return false;
+    const media = target.closest<HTMLElement>("[data-media]");
+    if (media?.dataset.media && media.dataset.src) {
+      setZoomed({
+        kind: media.dataset.media as LightboxMedia["kind"],
+        src: media.dataset.src,
+      });
+      return true;
+    }
+    const image = target.closest("img");
+    if (image) {
+      setZoomed({ kind: "image", src: image.src });
+      return true;
+    }
+    return false;
+  }, []);
 
   return (
-    <div className="mx-auto max-w-[650px] space-y-5 px-6 pt-14 pb-28">
-      {segments.length === 0 && (
-        <p
-          className="text-muted-foreground/50"
-          style={{ fontFamily, fontSize: `${fontSize}px`, lineHeight: 1.7 }}
-        >
-          Markdown preview
-        </p>
-      )}
-      {segments.map((seg, i) =>
-        seg.kind === "md" ? (
-          <div
-            key={i}
-            className="reader break-words"
+    <>
+      <div
+        onClick={(e) => {
+          if (openFrom(e.target)) e.preventDefault();
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          if (openFrom(e.target)) e.preventDefault();
+        }}
+        className="mx-auto max-w-[650px] space-y-5 px-6 pt-14 pb-28"
+      >
+        {segments.length === 0 && (
+          <p
+            className="text-muted-foreground/50"
             style={{ fontFamily, fontSize: `${fontSize}px`, lineHeight: 1.7 }}
-            dangerouslySetInnerHTML={{
-              __html: marked.parse(seg.text, { async: false }),
-            }}
-          />
-        ) : (
-          <JsonTree key={i} value={seg.value} />
-        )
+          >
+            Preview
+          </p>
+        )}
+        {segments.map((seg, i) =>
+          seg.kind === "md" ? (
+            <div
+              key={i}
+              className="reader preview break-words"
+              style={{ fontFamily, fontSize: `${fontSize}px`, lineHeight: 1.7 }}
+              dangerouslySetInnerHTML={{
+                __html: marked.parse(seg.text, { async: false }),
+              }}
+            />
+          ) : (
+            <JsonTree key={i} value={seg.value} />
+          )
+        )}
+      </div>
+      {zoomed && (
+        <Lightbox media={zoomed} onClose={() => setZoomed(null)} />
       )}
-    </div>
+    </>
   );
 }

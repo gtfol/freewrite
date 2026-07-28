@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { BottomNav } from "@/components/bottom-nav";
 import { Editor } from "@/components/editor";
 import { HistorySidebar } from "@/components/history-sidebar";
+import { SaveStatus } from "@/components/save-status";
 import { useMounted } from "@/hooks/use-mounted";
 import { useWriter } from "@/lib/store";
 
@@ -34,6 +35,7 @@ export function Writer() {
   return (
     <main className="h-dvh">
       <Editor />
+      <SaveStatus />
       <BottomNav />
       <HistorySidebar />
     </main>
