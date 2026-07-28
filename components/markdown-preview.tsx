@@ -55,10 +55,12 @@ function mediaHtml(media: Media): string {
         `<video src="${escapeAttr(media.src)}" preload="metadata" muted playsinline></video>`
       );
     case "youtube":
+      // mqdefault is the true 16:9 frame; hqdefault is a 4:3 image with
+      // black bars baked around widescreen video.
       return thumb(
         "youtube",
         media.id,
-        `<img src="https://i.ytimg.com/vi/${media.id}/hqdefault.jpg" alt="" loading="lazy" />`
+        `<img src="https://i.ytimg.com/vi/${media.id}/mqdefault.jpg" alt="" loading="lazy" />`
       );
   }
 }
