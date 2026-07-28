@@ -1,25 +1,23 @@
 /// <reference lib="webworker" />
 
-// Synthesis worker. Both engines live behind one `Engine` shape, so the rest
-// of the app never learns which one is running — only the manifest records it,
-// because an audiobook that switched engines halfway would change narrator
-// between paragraphs.
+// Synthesis worker.
+//
+// Engines live behind one `Engine` shape. Only Piper ships today — Kokoro was
+// tried and dropped, since its quantized builds sound metallic and the fp32
+// build that doesn't is a ~326MB download that still runs slower on CPU. The
+// indirection stays because it is what made that swap a small change.
 //
 // The worker also trims silence, derives word times, and encodes to Opus, so
 // the main thread gets a finished chunk and never sees a raw waveform.
 
 import { encodeAudio } from "@/lib/tts/codec";
 import { trimSilence, wordTimes } from "@/lib/tts/timing";
-import { engineVoiceId, findVoice, KOKORO_MODEL } from "@/lib/tts/voices";
+import { engineVoiceId, findVoice } from "@/lib/tts/voices";
 import type { EngineId, WordSpan } from "@/lib/tts/types";
 
 interface Engine {
   synth(text: string): Promise<{ audio: Float32Array; sampleRate: number }>;
 }
-
-// Structural, so the app doesn't take a dependency on @webgpu/types just to
-// ask whether an adapter exists.
-type GpuLike = { requestAdapter(): Promise<unknown> };
 
 export type WorkerRequest =
   | { type: "init"; voiceId: string }
@@ -33,7 +31,7 @@ export type WorkerRequest =
 
 export type WorkerResponse =
   | { type: "progress"; loaded: number; total: number }
-  | { type: "ready"; engine: EngineId; accelerated: boolean }
+  | { type: "ready"; engine: EngineId }
   | {
       type: "chunk";
       key: string;
@@ -51,46 +49,6 @@ let engine: Engine | null = null;
 
 function post(message: WorkerResponse, transfer?: Transferable[]) {
   scope.postMessage(message, transfer ?? []);
-}
-
-// `navigator.gpu` existing is not enough — a blocklisted driver still hands
-// back a null adapter, and that is the case we must not mistake for support.
-async function hasWebGPU(): Promise<boolean> {
-  const gpu = (navigator as Navigator & { gpu?: GpuLike }).gpu;
-  if (!gpu) return false;
-  try {
-    return !!(await gpu.requestAdapter());
-  } catch {
-    return false;
-  }
-}
-
-async function loadKokoro(voice: string, accelerated: boolean): Promise<Engine> {
-  const { KokoroTTS } = await import("kokoro-js");
-
-  // fp16 on WebGPU is the quality/size compromise: fp32 is the upstream
-  // recommendation but a ~300MB download, and q8 exists for the CPU path
-  // where memory bandwidth, not fidelity, is the limit.
-  const tts = await KokoroTTS.from_pretrained(KOKORO_MODEL, {
-    dtype: accelerated ? "fp16" : "q8",
-    device: accelerated ? "webgpu" : "wasm",
-    progress_callback: (progress) => {
-      const item = progress as { loaded?: number; total?: number };
-      if (typeof item.loaded === "number" && typeof item.total === "number") {
-        post({ type: "progress", loaded: item.loaded, total: item.total });
-      }
-    },
-  });
-
-  return {
-    async synth(text) {
-      // Voices are validated against our own catalog at init, so the cast
-      // past kokoro-js's literal union is safe.
-      const options = { voice } as Parameters<typeof tts.generate>[1];
-      const raw = await tts.generate(text, options);
-      return { audio: raw.audio, sampleRate: raw.sampling_rate };
-    },
-  };
 }
 
 // Piper hands back a WAV blob rather than samples.
@@ -153,14 +111,8 @@ async function init(voiceId: string) {
   const voice = findVoice(voiceId);
   if (!voice) throw new Error(`unknown voice ${voiceId}`);
 
-  const bare = engineVoiceId(voice);
-  const accelerated = voice.engine === "kokoro" ? await hasWebGPU() : false;
-  engine =
-    voice.engine === "kokoro"
-      ? await loadKokoro(bare, accelerated)
-      : await loadPiper(bare);
-
-  post({ type: "ready", engine: voice.engine, accelerated });
+  engine = await loadPiper(engineVoiceId(voice));
+  post({ type: "ready", engine: voice.engine });
 }
 
 async function synth(request: Extract<WorkerRequest, { type: "synth" }>) {

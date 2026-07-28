@@ -9,7 +9,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import type { TextIndex } from "@/lib/highlights";
-import { AudiobookGenerator, type EngineStatus } from "@/lib/tts/client";
+import { AudiobookGenerator } from "@/lib/tts/client";
 import {
   clearHighlight,
   clearOverlay,
@@ -43,10 +43,6 @@ const UI_THROTTLE_MS = 250;
 const itemClass =
   "text-muted-foreground transition-colors hover:text-foreground";
 
-// Structural, so the app doesn't take a dependency on @webgpu/types just to
-// ask whether an adapter exists.
-type GpuLike = { requestAdapter(): Promise<unknown> };
-
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
   const total = Math.floor(seconds);
@@ -54,20 +50,12 @@ function formatTime(seconds: number): string {
   return `${minutes}:${String(total % 60).padStart(2, "0")}`;
 }
 
-async function preferredVoice(): Promise<string> {
+// A stored choice only counts if it still exists — voices removed from the
+// catalog fall back rather than wedging the transport.
+function preferredVoice(): string {
   const stored =
     typeof localStorage !== "undefined" ? localStorage.getItem(VOICE_KEY) : null;
-  if (stored && findVoice(stored)) return stored;
-
-  // navigator.gpu existing isn't enough — a blocklisted driver still returns a
-  // null adapter, and Kokoro on the CPU path can't keep ahead of playback.
-  const gpu = (navigator as Navigator & { gpu?: GpuLike }).gpu;
-  try {
-    if (gpu && (await gpu.requestAdapter())) return DEFAULT_VOICE.kokoro;
-  } catch {
-    // Treated as no WebGPU.
-  }
-  return DEFAULT_VOICE.piper;
+  return stored && findVoice(stored) ? stored : DEFAULT_VOICE;
 }
 
 export function Audiobook({
@@ -79,9 +67,9 @@ export function Audiobook({
   contentRef: React.RefObject<HTMLDivElement | null>;
   wrapRef: React.RefObject<HTMLDivElement | null>;
 }) {
-  const [voiceId, setVoiceId] = useState<string | null>(null);
-  // Read once at mount. The transport only exists after a click, so this
-  // never runs during a server render.
+  // Both read once at mount. The transport only exists after a click, so
+  // neither runs during a server render.
+  const [voiceId, setVoiceId] = useState<string>(preferredVoice);
   const [speed, setSpeed] = useState(() => {
     if (typeof localStorage === "undefined") return 1;
     const stored = Number(localStorage.getItem(SPEED_KEY));
@@ -89,7 +77,6 @@ export function Audiobook({
   });
   const [generation, setGeneration] = useState<GenerationState>({ status: "idle" });
   const [playerState, setPlayerState] = useState<PlayerState>("idle");
-  const [engine, setEngine] = useState<EngineStatus | null>(null);
   const [display, setDisplay] = useState({ time: 0, total: 0 });
   const [pinned, setPinned] = useState(false);
 
@@ -102,7 +89,6 @@ export function Audiobook({
   const nativePaint = useRef(false);
 
   useEffect(() => {
-    void preferredVoice().then(setVoiceId);
     void requestPersistence();
   }, []);
 
@@ -234,10 +220,6 @@ export function Audiobook({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voiceId, article.id, contentRef, onPosition]);
 
-  useEffect(() => {
-    setEngine(generatorRef.current?.engineStatus ?? null);
-  }, [generation]);
-
   // Click-to-seek. Guarded on a collapsed selection so it never steals the
   // mouseup that ends a highlight drag, and skipped for links and note chips
   // which have their own behaviour.
@@ -336,10 +318,6 @@ export function Audiobook({
     if (playerState === "buffering") return "Buffering…";
     if (generation.status === "generating") {
       return `Generating ${generation.done}/${generation.total}`;
-    }
-    // Only worth saying on the slow path, where it changes what someone does.
-    if (engine && !engine.accelerated && engine.engine === "kokoro") {
-      return "Slower than playback on this device — Download for gapless";
     }
     return null;
   })();

@@ -23,7 +23,6 @@ const PERSIST_DEBOUNCE_MS = 1500;
 
 export interface EngineStatus {
   engine: EngineId;
-  accelerated: boolean;
 }
 
 export interface GeneratorEvents {
@@ -61,7 +60,7 @@ export class AudiobookGenerator {
       voiceId,
       // Provisional until the worker reports back — the manifest records what
       // actually produced the audio, not what we hoped would.
-      engine: voice?.engine ?? "kokoro",
+      engine: voice?.engine ?? "piper",
       model: voice?.model ?? "",
       chunks: chunks.map(blankChunk),
       pinned: false,
@@ -140,10 +139,7 @@ export class AudiobookGenerator {
           return;
         }
         if (message.type === "ready") {
-          this.status = {
-            engine: message.engine,
-            accelerated: message.accelerated,
-          };
+          this.status = { engine: message.engine };
           this.book.engine = message.engine;
           resolve(this.status);
           return;
