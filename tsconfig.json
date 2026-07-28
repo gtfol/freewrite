@@ -10,6 +10,9 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
+    // Tests run on Node's built-in runner, which resolves the real file and so
+    // needs explicit .ts specifiers. Safe with noEmit — nothing is rewritten.
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,

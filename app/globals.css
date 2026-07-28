@@ -26,6 +26,10 @@
   --highlight: oklch(0.94 0.07 152);
   --highlight-hover: oklch(0.89 0.1 152);
   --highlight-accent: oklch(0.55 0.14 152);
+  /* Read-along, deliberately a different hue from annotations: one is
+     something you saved, the other is where the voice is right now. */
+  --read-sentence: oklch(0.96 0.035 85);
+  --read-word: oklch(0.88 0.11 85);
   --syntax-key: oklch(0.48 0.1 240);
   --syntax-string: oklch(0.5 0.11 150);
   --syntax-number: oklch(0.5 0.14 265);
@@ -56,6 +60,8 @@
   --highlight: oklch(0.45 0.09 152 / 45%);
   --highlight-hover: oklch(0.5 0.1 152 / 60%);
   --highlight-accent: oklch(0.72 0.12 152);
+  --read-sentence: oklch(0.42 0.05 85 / 35%);
+  --read-word: oklch(0.62 0.1 85 / 55%);
   --syntax-key: oklch(0.75 0.09 240);
   --syntax-string: oklch(0.76 0.11 150);
   --syntax-number: oklch(0.76 0.11 265);
@@ -239,6 +245,23 @@
     width: 0.75em;
     height: 0.75em;
   }
+}
+
+/* Audiobook read-along. These style live Ranges through the CSS Custom
+   Highlight API rather than elements, which is precisely why read-along can
+   share the article with the <mark>-based annotation layer above: it mutates
+   no DOM. Note that ::highlight() accepts only a short list of properties —
+   background-color and color among them, but nothing that affects layout.
+
+   The CSS optimizer warns that ::highlight is not a known pseudo-element; its
+   selector database predates the API. It passes the rules through unchanged,
+   which is verifiable in the built stylesheet — the warning is cosmetic, and
+   deleting these rules to silence it would silently disable read-along. */
+::highlight(tts-sentence) {
+  background-color: var(--read-sentence);
+}
+::highlight(tts-word) {
+  background-color: var(--read-word);
 }
 
 /* Embedded media in the side-by-side preview. Everything renders as a modest

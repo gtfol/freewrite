@@ -143,14 +143,25 @@ export interface TrimControls {
   onCancel: () => void;
 }
 
+export interface ListenControls {
+  active: boolean;
+  onToggle: () => void;
+}
+
 export function ReaderNav({
   article,
   onDelete,
   trim,
+  listen,
+  banner,
 }: {
   article?: Article;
   onDelete?: () => void;
   trim?: TrimControls;
+  listen?: ListenControls;
+  // Rendered inside the nav, above the links — the audiobook transport sits
+  // here so the two never fight over the bottom of the screen.
+  banner?: React.ReactNode;
 }) {
   const { theme, setTheme } = useTheme();
   const fullscreen = useFullscreen();
@@ -194,6 +205,7 @@ export function ReaderNav({
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 bg-background">
+      {banner}
       <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-6 py-4 text-[13px]">
         {article ? (
           <>
@@ -201,6 +213,18 @@ export function ReaderNav({
               ← Read
             </Link>
             <Dot />
+            {listen && (
+              <>
+                <button
+                  type="button"
+                  onClick={listen.onToggle}
+                  className={listen.active ? "text-foreground" : itemClass}
+                >
+                  Listen
+                </button>
+                <Dot />
+              </>
+            )}
             <ArticleChatPopover article={article} />
             <Dot />
             <a
