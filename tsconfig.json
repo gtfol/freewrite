@@ -1,7 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    // dom.asynciterable is what types FileSystemDirectoryHandle's iterators;
+    // sizing the voice cache means walking an OPFS directory.
+    "lib": ["dom", "dom.iterable", "dom.asynciterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,

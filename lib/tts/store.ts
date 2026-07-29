@@ -17,7 +17,9 @@ import {
   localKeys,
   localPut,
 } from "@/lib/db";
+import { audioSizes, bookBytes, type AudioSizes } from "@/lib/tts/size";
 import type { AudioRecord, Audiobook } from "@/lib/tts/types";
+import { VOICE_CACHE_DIR } from "@/lib/tts/voices";
 
 // Soft ceiling for generated audio. At ~3KB/s of Opus this is many hours of
 // listening, and eviction is by least-recently-played so the articles you
@@ -60,21 +62,25 @@ export async function deleteAudiobook(articleId: string): Promise<void> {
   await collectGarbage();
 }
 
-function bookBytes(book: Audiobook): number {
-  return book.chunks.reduce((sum, chunk) => sum + (chunk.bytes ?? 0), 0);
+async function estimate(): Promise<{ usage: number; quota: number }> {
+  if (typeof navigator === "undefined" || !navigator.storage?.estimate) {
+    return { usage: 0, quota: 0 };
+  }
+  try {
+    const { usage = 0, quota = 0 } = await navigator.storage.estimate();
+    return { usage, quota };
+  } catch {
+    return { usage: 0, quota: 0 };
+  }
 }
 
 async function budget(): Promise<number> {
-  if (typeof navigator === "undefined" || !navigator.storage?.estimate) {
-    return BUDGET_BYTES;
-  }
-  try {
-    const { quota = 0, usage = 0 } = await navigator.storage.estimate();
-    const free = Math.max(0, quota - usage);
-    return Math.max(0, Math.min(BUDGET_BYTES, free * QUOTA_SHARE));
-  } catch {
-    return BUDGET_BYTES;
-  }
+  const { usage, quota } = await estimate();
+  // No estimate means no basis to shrink the budget — fall back to it whole
+  // rather than to the zero the failed estimate would imply.
+  if (quota === 0) return BUDGET_BYTES;
+  const free = Math.max(0, quota - usage);
+  return Math.max(0, Math.min(BUDGET_BYTES, free * QUOTA_SHARE));
 }
 
 // Asks the browser not to evict us under storage pressure. Best-effort: the
@@ -88,6 +94,98 @@ export async function requestPersistence(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export interface StorageReport extends AudioSizes {
+  // Voice models live in OPFS rather than IndexedDB and are shared by every
+  // article, so they are counted apart from audio: a ~60MB model is the usual
+  // answer to "why is this site using 200MB".
+  voiceBytes: number;
+  // What the origin is using in total, and what it is allowed. Both are
+  // browser estimates, deliberately fuzzed to resist fingerprinting, and the
+  // quota is a shared ceiling rather than reserved space — the panel says so
+  // rather than dressing them up as disk figures.
+  usageBytes: number;
+  quotaBytes: number;
+}
+
+// Measured by walking the directory rather than by asking which voices the
+// catalog knows about, so the figure covers a model left behind by a voice
+// since removed from the list. That also keeps it honest about the clear
+// below, which takes the whole directory.
+//
+// The engine can't be asked instead: it holds the model sizes, but importing
+// it would pull onnxruntime into the page that only wants to print a number.
+async function voiceBytes(): Promise<number> {
+  if (typeof navigator === "undefined" || !navigator.storage?.getDirectory) {
+    return 0;
+  }
+  try {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle(VOICE_CACHE_DIR);
+    let total = 0;
+    for await (const handle of dir.values()) {
+      // `kind` doesn't narrow: FileSystemHandle is a base interface rather
+      // than a discriminated union of the two handle types.
+      if (handle.kind !== "file") continue;
+      total += (await (handle as FileSystemFileHandle).getFile()).size;
+    }
+    return total;
+  } catch {
+    // No directory yet, or the browser has no OPFS.
+    return 0;
+  }
+}
+
+async function removeVoices(): Promise<void> {
+  if (typeof navigator === "undefined" || !navigator.storage?.getDirectory) {
+    return;
+  }
+  try {
+    const root = await navigator.storage.getDirectory();
+    await root.removeEntry(VOICE_CACHE_DIR, { recursive: true });
+  } catch {
+    // Nothing there to remove.
+  }
+}
+
+export async function storageReport(): Promise<StorageReport> {
+  const books = await localGetAll<Audiobook>(AUDIOBOOKS);
+  const { usage, quota } = await estimate();
+  return {
+    ...audioSizes(books),
+    voiceBytes: await voiceBytes(),
+    usageBytes: usage,
+    quotaBytes: quota,
+  };
+}
+
+// Clearing the cache never touches a download. Dropping the unpinned
+// manifests is most of it — the chunk sweep below reclaims whatever they were
+// the last reference to, and a sentence a downloaded article still points at
+// survives. The voice models go with them: they are a cache by the same
+// definition, re-fetched on demand and owned by no article, and a Clear that
+// left the largest item on the panel behind would not be one.
+export async function clearCache(): Promise<void> {
+  const books = await localGetAll<Audiobook>(AUDIOBOOKS);
+  const unpinned = books
+    .filter((book) => !book.pinned)
+    .map((book) => book.articleId);
+  if (unpinned.length > 0) await localDeleteMany(AUDIOBOOKS, unpinned);
+  await collectGarbage();
+  await removeVoices();
+}
+
+// Deletes rather than unpins: someone reaching for this wants the space back,
+// and audio that lingered until the collector next felt pressure would not be
+// that.
+export async function removeAllDownloads(): Promise<void> {
+  const books = await localGetAll<Audiobook>(AUDIOBOOKS);
+  const pinned = books
+    .filter((book) => book.pinned)
+    .map((book) => book.articleId);
+  if (pinned.length > 0) await localDeleteMany(AUDIOBOOKS, pinned);
+  await collectGarbage();
 }
 
 // Three passes, cheapest first:
