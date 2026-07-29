@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { usePrefs } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
+const HINT = "Preview only — click Preview to write";
+
 // Keys that mean "I'm trying to write here" — a bare character, a newline,
 // or a delete. Shortcuts (⌘K and friends) are not typing.
 function isTyping(event: KeyboardEvent): boolean {
@@ -50,15 +52,26 @@ export function PreviewHint() {
     };
   }, [full]);
 
+  const showing = full && visible;
+
   return (
-    <p
-      aria-live="polite"
-      className={cn(
-        "pointer-events-none fixed top-4 left-1/2 z-30 -translate-x-1/2 text-xs text-muted-foreground/70 transition-opacity duration-500",
-        full && visible ? "opacity-100" : "opacity-0"
-      )}
-    >
-      Preview only — click Preview to write
-    </p>
+    <>
+      <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center">
+        <p
+          aria-hidden="true"
+          className={cn(
+            "rounded-full bg-foreground/90 px-5 py-2.5 text-sm text-background backdrop-blur-sm transition-all duration-300",
+            showing ? "scale-100 opacity-100" : "scale-95 opacity-0"
+          )}
+        >
+          {HINT}
+        </p>
+      </div>
+      {/* The pill stays mounted so it can fade out; the announcement only
+          exists while the hint is up, so it is read when it happens. */}
+      <p role="status" className="sr-only">
+        {showing ? HINT : ""}
+      </p>
+    </>
   );
 }
