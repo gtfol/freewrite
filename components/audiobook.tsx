@@ -289,15 +289,10 @@ export function Audiobook({
     setGeneration({ status: "idle" });
   };
 
-  // Removing a download only unpins it. The audio stays playable and stays in
-  // the cache; it is simply evictable again, which is what the collector needs
-  // to be able to reclaim it.
-  const toggleDownload = () => {
-    const generator = generatorRef.current;
-    if (!generator) return;
-    const next = !pinned;
-    setPinned(next);
-    void (next ? generator.pin() : generator.unpin());
+  // Removing a download is a storage decision, not a reading one, so it lives
+  // in the storage panel on /read rather than in the transport.
+  const download = () => {
+    void generatorRef.current?.pin().then(() => setPinned(true));
   };
 
   const scrub = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -314,10 +309,14 @@ export function Audiobook({
   const status = (() => {
     if (generation.status === "error") {
       // Voices are fetched on first use, so the common failure is the network
-      // rather than anything the raw message would help with.
+      // rather than anything the raw message would help with. Nothing else is
+      // fit to show either: the engine is Emscripten output and throws raw
+      // pointers, so an unrecognized message is as likely to be an integer as
+      // a sentence. The worker logs the original object for whoever is
+      // debugging it.
       return /fetch|network|load|http/i.test(generation.message)
         ? "Couldn't download the voice — check your connection."
-        : generation.message;
+        : "Couldn't read this one aloud.";
     }
     if (generation.status === "loading-model") {
       return `Downloading voice… ${Math.round(generation.progress * 100)}%`;
@@ -401,8 +400,13 @@ export function Audiobook({
             </PopoverContent>
           </Popover>
 
-          <button type="button" onClick={toggleDownload} className={itemClass}>
-            {pinned ? "Downloaded · Remove" : "Download"}
+          <button
+            type="button"
+            onClick={download}
+            disabled={pinned}
+            className={`${itemClass} disabled:opacity-40`}
+          >
+            {pinned ? "Downloaded" : "Download"}
           </button>
 
           {status && (

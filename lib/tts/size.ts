@@ -41,6 +41,44 @@ export function audioSizes(books: Audiobook[]): AudioSizes {
   return sizes;
 }
 
+export interface StorageSlice {
+  key: "voices" | "downloads" | "cache" | "other";
+  label: string;
+  bytes: number;
+}
+
+// The bar divides up what this site stores, not the disk. An origin's quota
+// runs to tens of gigabytes, so measured against it every slice worth looking
+// at would round to a hairline — the free figure is better said in words.
+//
+// `other` is everything the origin holds that isn't audio or a voice: entries,
+// articles, highlights. It is clamped at zero because the two figures come
+// from different places — usage is the browser's rounded estimate of the whole
+// origin, our sizes are exact — and a rounding-down can otherwise print a
+// negative slice.
+export function storageSlices(report: {
+  audioBytes: number;
+  clearableBytes: number;
+  voiceBytes: number;
+  usageBytes: number;
+}): StorageSlice[] {
+  const ours = report.audioBytes + report.voiceBytes;
+  return [
+    { key: "voices", label: "Voices", bytes: report.voiceBytes },
+    {
+      key: "downloads",
+      label: "Downloads",
+      bytes: report.audioBytes - report.clearableBytes,
+    },
+    { key: "cache", label: "Audio cache", bytes: report.clearableBytes },
+    {
+      key: "other",
+      label: "Other site data",
+      bytes: Math.max(0, report.usageBytes - ours),
+    },
+  ];
+}
+
 // One unit, no decimals below a gigabyte. This is a number someone glances at
 // to decide whether to press Clear, not an accounting figure.
 export function formatBytes(bytes: number): string {

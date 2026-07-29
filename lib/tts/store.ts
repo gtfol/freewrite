@@ -64,17 +64,25 @@ export async function deleteAudiobook(articleId: string): Promise<void> {
   await collectGarbage();
 }
 
-async function budget(): Promise<number> {
+async function estimate(): Promise<{ usage: number; quota: number }> {
   if (typeof navigator === "undefined" || !navigator.storage?.estimate) {
-    return BUDGET_BYTES;
+    return { usage: 0, quota: 0 };
   }
   try {
-    const { quota = 0, usage = 0 } = await navigator.storage.estimate();
-    const free = Math.max(0, quota - usage);
-    return Math.max(0, Math.min(BUDGET_BYTES, free * QUOTA_SHARE));
+    const { usage = 0, quota = 0 } = await navigator.storage.estimate();
+    return { usage, quota };
   } catch {
-    return BUDGET_BYTES;
+    return { usage: 0, quota: 0 };
   }
+}
+
+async function budget(): Promise<number> {
+  const { usage, quota } = await estimate();
+  // No estimate means no basis to shrink the budget — fall back to it whole
+  // rather than to the zero the failed estimate would imply.
+  if (quota === 0) return BUDGET_BYTES;
+  const free = Math.max(0, quota - usage);
+  return Math.max(0, Math.min(BUDGET_BYTES, free * QUOTA_SHARE));
 }
 
 // Asks the browser not to evict us under storage pressure. Best-effort: the
@@ -91,11 +99,16 @@ export async function requestPersistence(): Promise<boolean> {
 }
 
 export interface StorageReport extends AudioSizes {
-  // Voice models live in OPFS rather than IndexedDB, are shared by every
-  // article, and are deliberately outside the audio GC. Reported apart from
-  // audio because a ~60MB model is the usual answer to "why is this site
-  // using 200MB", and because clearing the cache never touches one.
+  // Voice models live in OPFS rather than IndexedDB and are shared by every
+  // article, so they are counted apart from audio: a ~60MB model is the usual
+  // answer to "why is this site using 200MB".
   voiceBytes: number;
+  // What the origin is using in total, and what it is allowed. Both are
+  // browser estimates, deliberately fuzzed to resist fingerprinting, and the
+  // quota is a shared ceiling rather than reserved space — the panel says so
+  // rather than dressing them up as disk figures.
+  usageBytes: number;
+  quotaBytes: number;
 }
 
 // vits-web says which voices are stored but not what they cost, and asking
@@ -132,27 +145,43 @@ async function voiceBytes(): Promise<number> {
 
 export async function storageReport(): Promise<StorageReport> {
   const books = await localGetAll<Audiobook>(AUDIOBOOKS);
-  return { ...audioSizes(books), voiceBytes: await voiceBytes() };
+  const { usage, quota } = await estimate();
+  return {
+    ...audioSizes(books),
+    voiceBytes: await voiceBytes(),
+    usageBytes: usage,
+    quotaBytes: quota,
+  };
 }
 
 // Clearing the cache never touches a download. Dropping the unpinned
-// manifests is the whole operation — the chunk sweep below reclaims whatever
-// they were the last reference to, and a sentence a downloaded article still
-// points at survives it.
-export async function clearAudioCache(): Promise<void> {
+// manifests is most of it — the chunk sweep below reclaims whatever they were
+// the last reference to, and a sentence a downloaded article still points at
+// survives. The voice models go with them: they are a cache by the same
+// definition, re-fetched on demand and owned by no article, and a Clear that
+// left the largest item on the panel behind would not be one.
+export async function clearCache(): Promise<void> {
   const books = await localGetAll<Audiobook>(AUDIOBOOKS);
   const unpinned = books
     .filter((book) => !book.pinned)
     .map((book) => book.articleId);
   if (unpinned.length > 0) await localDeleteMany(AUDIOBOOKS, unpinned);
   await collectGarbage();
-}
 
-// Voice models are shared by every article and sit outside the collector, so
-// they only ever go on an explicit ask. The next listen downloads them again.
-export async function removeVoices(): Promise<void> {
   const vits = await import("@diffusionstudio/vits-web");
   await vits.flush();
+}
+
+// Deletes rather than unpins: someone reaching for this wants the space back,
+// and audio that lingered until the collector next felt pressure would not be
+// that.
+export async function removeAllDownloads(): Promise<void> {
+  const books = await localGetAll<Audiobook>(AUDIOBOOKS);
+  const pinned = books
+    .filter((book) => book.pinned)
+    .map((book) => book.articleId);
+  if (pinned.length > 0) await localDeleteMany(AUDIOBOOKS, pinned);
+  await collectGarbage();
 }
 
 // Three passes, cheapest first:

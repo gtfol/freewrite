@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { audioSizes, bookBytes, formatBytes } from "./size.ts";
+import { audioSizes, bookBytes, formatBytes, storageSlices } from "./size.ts";
 import type { Audiobook, StoredChunk } from "./types.ts";
 
 const KB = 1024;
@@ -56,6 +56,47 @@ test("audioSizes handles an empty cache", () => {
     books: 0,
     pinned: 0,
   });
+});
+
+test("storageSlices splits audio into what was kept and what wasn't", () => {
+  const slices = storageSlices({
+    audioBytes: 100 * MB,
+    clearableBytes: 40 * MB,
+    voiceBytes: 63 * MB,
+    usageBytes: 175 * MB,
+  });
+  assert.deepEqual(
+    slices.map((slice) => [slice.key, slice.bytes / MB]),
+    [
+      ["voices", 63],
+      ["downloads", 60],
+      ["cache", 40],
+      ["other", 12],
+    ]
+  );
+});
+
+// usage is the browser's rounded estimate of the whole origin while our sizes
+// are exact, so the subtraction can go negative — and a negative slice would
+// render as a bar segment pointing the wrong way.
+test("storageSlices never reports a negative remainder", () => {
+  const slices = storageSlices({
+    audioBytes: 100 * MB,
+    clearableBytes: 40 * MB,
+    voiceBytes: 63 * MB,
+    usageBytes: 4 * MB,
+  });
+  assert.equal(slices.find((slice) => slice.key === "other")?.bytes, 0);
+});
+
+test("storageSlices survives an origin storing nothing at all", () => {
+  const slices = storageSlices({
+    audioBytes: 0,
+    clearableBytes: 0,
+    voiceBytes: 0,
+    usageBytes: 0,
+  });
+  assert.deepEqual(slices.map((slice) => slice.bytes), [0, 0, 0, 0]);
 });
 
 test("formatBytes picks one unit and no decimals below a gigabyte", () => {

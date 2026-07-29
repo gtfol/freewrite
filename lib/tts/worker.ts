@@ -150,6 +150,11 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
   const run = request.type === "init" ? init(request.voiceId) : synth(request);
   void run.catch((error: unknown) => {
+    // Piper is Emscripten output and throws raw pointers into wasm memory
+    // rather than Errors, so `message` below can stringify to a bare integer.
+    // The original object is the only thing worth inspecting, and this is the
+    // last place it exists.
+    console.error("tts worker failed", error);
     post({
       type: "error",
       key: request.type === "synth" ? request.key : undefined,

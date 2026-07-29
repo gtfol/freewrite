@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Moon, Sun } from "lucide-react";
+import { Moon, Settings, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import {
@@ -10,6 +10,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { StorageSidebar } from "@/components/storage-sidebar";
 import { SyncPopover } from "@/components/sync-popover";
 import { useFullscreen } from "@/hooks/use-fullscreen";
 import { articleMarkdown } from "@/lib/articles";
@@ -167,6 +168,10 @@ export function ReaderNav({
 }) {
   const { theme, setTheme } = useTheme();
   const fullscreen = useFullscreen();
+  // Only offered on the library index. On an article the transport holds an
+  // open generator that rewrites its manifest on dispose, which would put back
+  // an audiobook the panel had just deleted.
+  const [storageOpen, setStorageOpen] = useState(false);
 
   if (trim?.active) {
     return (
@@ -259,9 +264,20 @@ export function ReaderNav({
             )}
           </>
         ) : (
-          <Link href="/" className={itemClass}>
-            Write
-          </Link>
+          <>
+            <Link href="/" className={itemClass}>
+              Write
+            </Link>
+            <Dot />
+            <button
+              type="button"
+              onClick={() => setStorageOpen(true)}
+              title="Storage"
+              className={`flex items-center ${itemClass}`}
+            >
+              <Settings className="size-4" />
+            </button>
+          </>
         )}
         {fullscreen.supported && (
           <>
@@ -290,6 +306,12 @@ export function ReaderNav({
         </button>
         <SyncPopover />
       </div>
+      {!article && (
+        <StorageSidebar
+          open={storageOpen}
+          onClose={() => setStorageOpen(false)}
+        />
+      )}
     </nav>
   );
 }
