@@ -134,6 +134,12 @@
 .reader {
   font-size: 1.1875rem;
   line-height: 1.75;
+  /* Articles carry text that has no spaces to break at — bare URLs, file
+     names, chemical names — and on a phone one of them is wider than the
+     column. Break inside the word rather than let it run off the edge and
+     take the whole page's horizontal scroll with it. <pre> is exempt for
+     free: it doesn't wrap at all, so it keeps scrolling on its own. */
+  overflow-wrap: break-word;
 
   & > * + * {
     margin-top: 1.25em;
@@ -209,6 +215,15 @@
     margin-right: 0.5em;
     accent-color: var(--color-foreground);
   }
+  /* Display math has no break points at all — an equation is as wide as it
+     is — so a long one pans within its own line rather than pushing the
+     article sideways. KaTeX wraps each display block in .katex-display. */
+  & .katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    /* Room for the scrollbar to appear without clipping the glyphs above it. */
+    padding-block: 0.2em;
+  }
   & figcaption {
     font-size: 0.8em;
     text-align: center;
@@ -220,8 +235,15 @@
     border-top: 1px solid var(--color-border);
     margin-block: 2.5em;
   }
+  /* A table is the one block that can't be made narrower without wrecking it,
+     so it scrolls instead: laid out as a block at its content width, capped
+     to the column. Wider than the column and it pans; narrower and it sits at
+     its natural size. */
   & table {
-    width: 100%;
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
     font-size: 0.9em;
     border-collapse: collapse;
   }

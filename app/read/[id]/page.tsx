@@ -16,6 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { ArticleTitle } from "@/components/article-title";
 import { Audiobook } from "@/components/audiobook";
 import { HighlightLayer } from "@/components/highlight-layer";
 import { ReaderNav } from "@/components/reader-nav";
@@ -145,6 +146,12 @@ export default function ArticlePage({
     );
   };
 
+  const rename = (title: string) => {
+    const updated: Article = { ...article, title, updatedAt: Date.now() };
+    void putArticle(updated);
+    setArticle(updated);
+  };
+
   const saveHighlights = (highlights: Highlight[]) => {
     const updated: Article = {
       ...article,
@@ -216,9 +223,7 @@ export default function ArticlePage({
           ref={bodyRef}
           style={{ fontFamily: "var(--font-crimson), Georgia, serif" }}
         >
-          <h1 className="text-[1.75rem] leading-tight font-semibold">
-            {article.title}
-          </h1>
+          <ArticleTitle title={article.title} onRename={rename} />
           <p className="mt-3 font-sans text-xs text-muted-foreground">
             {meta}
             {meta && " · "}

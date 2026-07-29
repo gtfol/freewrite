@@ -311,7 +311,7 @@ export default function ReadPage() {
                   <Link href={`/read/${article.id}`} className="block py-4 pr-14">
                     <span
                       className={cn(
-                        "block text-[15px] leading-snug",
+                        "block break-words text-[15px] leading-snug",
                         article.readAt
                           ? "text-muted-foreground"
                           : "text-foreground"
