@@ -81,7 +81,11 @@ interface Pos {
 type Panel =
   | { kind: "select"; pos: Pos; anchor: QuoteAnchor }
   | { kind: "actions"; pos: Pos; id: string }
-  | { kind: "note"; pos: Pos; id: string }
+  // A note lives on its highlight, so removing the highlight takes the comment
+  // with it — irreversibly, and on every synced device. `armed` is the second
+  // tap that costs asks for: only this card can reach a comment, since a
+  // highlight carrying one always opens here rather than in the plain pill.
+  | { kind: "note"; pos: Pos; id: string; armed: boolean }
   | {
       kind: "compose";
       pos: Pos;
@@ -189,7 +193,9 @@ export function HighlightLayer({
       e.preventDefault();
       const pos = relativeTo(wrap, (chip ?? mark)!.getBoundingClientRect());
       setPanel(
-        hl.note ? { kind: "note", pos, id } : { kind: "actions", pos, id }
+        hl.note
+          ? { kind: "note", pos, id, armed: false }
+          : { kind: "actions", pos, id }
       );
     };
     root.addEventListener("click", onClick);
@@ -389,7 +395,7 @@ export function HighlightLayer({
   return card(
     <>
       <p className="text-sm whitespace-pre-wrap">{hl.note}</p>
-      <div className="mt-3 flex items-center gap-4 text-xs">
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
         <button
           type="button"
           className={cardAction}
@@ -412,12 +418,23 @@ export function HighlightLayer({
         >
           Delete comment
         </button>
+        {/* Named for what it takes, and armed before it takes it. */}
         <button
           type="button"
-          className="text-muted-foreground transition-colors hover:text-destructive"
-          onClick={() => removeHighlight(panel.id)}
+          className={
+            panel.armed
+              ? "text-destructive"
+              : "text-muted-foreground transition-colors hover:text-destructive"
+          }
+          onClick={() =>
+            panel.armed
+              ? removeHighlight(panel.id)
+              : setPanel({ ...panel, armed: true })
+          }
         >
-          Remove highlight
+          {panel.armed
+            ? "Deletes the comment too — tap again"
+            : "Remove highlight & comment"}
         </button>
       </div>
     </>
