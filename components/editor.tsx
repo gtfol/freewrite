@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 
 import { MarkdownPreview } from "@/components/markdown-preview";
+import { SplitPreviewHint } from "@/components/preview-hint";
 import { fontById } from "@/lib/fonts";
 import { currentEntry, usePrefs, useWriter } from "@/lib/store";
 
@@ -184,11 +185,11 @@ export function Editor() {
   return (
     <div className="flex h-full">
       <div className="h-full min-w-0 flex-1">{textarea}</div>
-      <div
-        ref={previewRef}
-        className="no-scrollbar hidden h-full min-w-0 flex-1 overflow-y-auto border-l md:block"
-      >
-        {preview}
+      <div className="relative hidden h-full min-w-0 flex-1 border-l md:block">
+        <div ref={previewRef} className="no-scrollbar h-full overflow-y-auto">
+          {preview}
+        </div>
+        <SplitPreviewHint />
       </div>
     </div>
   );
