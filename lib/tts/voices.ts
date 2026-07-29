@@ -5,6 +5,14 @@ import type { Voice } from "@/lib/tts/types";
 // part of every chunk key.
 export const PIPER_MODEL = "piper-voices-1.0";
 
+// The OPFS directory holding downloaded voice models, one flat folder of
+// `<voiceId>.onnx` and `<voiceId>.onnx.json`. Inherited from vits-web so
+// voices already on disk stay usable, and it lives here rather than in
+// piper.ts because the storage panel has to size and clear the same directory
+// the engine fills — and must not drag onnxruntime into the page to learn its
+// name.
+export const VOICE_CACHE_DIR = "piper";
+
 // Piper ships 900+ voices, which is a worse decision to hand someone than a
 // curated handful. These are the English ones worth listening to for an hour.
 export const VOICES: Voice[] = [

@@ -439,6 +439,8 @@ export function Audiobook({
     setGeneration({ status: "idle" });
   };
 
+  // Removing a download is a storage decision, not a reading one, so it lives
+  // in the storage panel on /read rather than in the transport.
   const download = () => {
     void generatorRef.current?.pin().then(() => setPinned(true));
   };

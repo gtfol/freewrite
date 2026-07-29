@@ -29,6 +29,7 @@ import {
 } from "@/lib/articles";
 import { deleteArticle, listArticles, putArticle } from "@/lib/db";
 import { SYNC_APPLIED_EVENT } from "@/lib/sync";
+import { collectGarbage } from "@/lib/tts/store";
 import type { Article, ExtractedArticle, ExtractSource } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -97,6 +98,12 @@ export default function ReadPage() {
     refresh();
     window.addEventListener(SYNC_APPLIED_EVENT, refresh);
     return () => window.removeEventListener(SYNC_APPLIED_EVENT, refresh);
+  }, []);
+
+  // The collector otherwise only ran when the audiobook transport unmounted,
+  // so someone who stopped opening the reader never reclaimed anything.
+  useEffect(() => {
+    void collectGarbage();
   }, []);
 
   const save = async (data: ExtractedArticle, source: ExtractSource) => {

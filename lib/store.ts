@@ -14,15 +14,25 @@ import { DEFAULT_FONT_ID, DEFAULT_FONT_SIZE } from "@/lib/fonts";
 import { clearShareRecord, getShareRecord } from "@/lib/shares";
 import type { Entry } from "@/lib/types";
 
+// Preview cycles rather than toggles: writing only, writing beside the
+// rendered text, then the rendered text on its own.
+export type PreviewMode = "off" | "split" | "full";
+
+const PREVIEW_CYCLE: Record<PreviewMode, PreviewMode> = {
+  off: "split",
+  split: "full",
+  full: "off",
+};
+
 interface PrefsState {
   fontId: string;
   fontSize: number;
   backspaceDisabled: boolean;
-  markdownPreview: boolean;
+  previewMode: PreviewMode;
   setFont: (fontId: string) => void;
   setFontSize: (size: number) => void;
   toggleBackspace: () => void;
-  toggleMarkdownPreview: () => void;
+  cyclePreview: () => void;
 }
 
 export const usePrefs = create<PrefsState>()(
@@ -31,15 +41,29 @@ export const usePrefs = create<PrefsState>()(
       fontId: DEFAULT_FONT_ID,
       fontSize: DEFAULT_FONT_SIZE,
       backspaceDisabled: false,
-      markdownPreview: false,
+      previewMode: "off",
       setFont: (fontId) => set({ fontId }),
       setFontSize: (fontSize) => set({ fontSize }),
       toggleBackspace: () =>
         set((s) => ({ backspaceDisabled: !s.backspaceDisabled })),
-      toggleMarkdownPreview: () =>
-        set((s) => ({ markdownPreview: !s.markdownPreview })),
+      cyclePreview: () =>
+        set((s) => ({ previewMode: PREVIEW_CYCLE[s.previewMode] })),
     }),
-    { name: "freewrite:prefs" }
+    {
+      name: "freewrite:prefs",
+      version: 1,
+      // v0 stored a markdownPreview boolean; on/off maps onto split/off.
+      migrate: (state, version) => {
+        if (version >= 1) return state as PrefsState;
+        const { markdownPreview, ...rest } = (state ?? {}) as Partial<PrefsState> & {
+          markdownPreview?: boolean;
+        };
+        return {
+          ...rest,
+          previewMode: markdownPreview ? "split" : "off",
+        } as PrefsState;
+      },
+    }
   )
 );
 

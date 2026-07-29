@@ -11,7 +11,7 @@ import { SharePopover } from "@/components/share-popover";
 import { SyncPopover } from "@/components/sync-popover";
 import { TimerButton } from "@/components/timer-button";
 import { useFullscreen } from "@/hooks/use-fullscreen";
-import { usePrefs, useTimer, useWriter } from "@/lib/store";
+import { type PreviewMode, usePrefs, useTimer, useWriter } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 function NavButton({
@@ -36,11 +36,18 @@ function Dot() {
   return <span className="text-muted-foreground/40 select-none">•</span>;
 }
 
+// Each click moves one step around the cycle; the tooltip names the next stop.
+const PREVIEW_TITLES: Record<PreviewMode, string> = {
+  off: "Preview beside the writing",
+  split: "Preview on its own",
+  full: "Back to writing",
+};
+
 export function BottomNav() {
   const backspaceDisabled = usePrefs((s) => s.backspaceDisabled);
-  const markdownPreview = usePrefs((s) => s.markdownPreview);
+  const previewMode = usePrefs((s) => s.previewMode);
   const toggleBackspace = usePrefs((s) => s.toggleBackspace);
-  const toggleMarkdownPreview = usePrefs((s) => s.toggleMarkdownPreview);
+  const cyclePreview = usePrefs((s) => s.cyclePreview);
 
   const running = useTimer((s) => s.running);
   const addEntry = useWriter((s) => s.addEntry);
@@ -60,12 +67,10 @@ export function BottomNav() {
         running && !hovered ? "opacity-0" : "opacity-100"
       )}
     >
-      <div className="mx-auto flex max-w-[1000px] flex-wrap items-center justify-center gap-x-3 gap-y-1 px-6 py-4 text-[13px] md:justify-between">
+      <div className="mx-auto flex max-w-[1000px] flex-wrap items-center justify-center gap-x-3 gap-y-1 px-6 py-4 text-[13px]">
         <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
           <FontPopover />
-        </div>
-
-        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+          <Dot />
           <TimerButton />
           <Dot />
           <ChatPopover />
@@ -93,9 +98,10 @@ export function BottomNav() {
           </NavButton>
           <Dot />
           <NavButton
-            active={markdownPreview}
-            onClick={toggleMarkdownPreview}
-            title="Side-by-side preview"
+            active={previewMode !== "off"}
+            onClick={cyclePreview}
+            title={PREVIEW_TITLES[previewMode]}
+            className={cn(previewMode === "full" && "underline underline-offset-4")}
           >
             Preview
           </NavButton>

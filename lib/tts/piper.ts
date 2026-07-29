@@ -21,12 +21,11 @@ import createPiperPhonemize from "@diffusionstudio/piper-wasm/build/piper_phonem
 import * as ort from "onnxruntime-web";
 
 import { describeThrown } from "@/lib/tts/errors";
+import { VOICE_CACHE_DIR } from "@/lib/tts/voices";
 import type { Scales } from "@/lib/tts/types";
 
 const HF_BASE =
   "https://huggingface.co/diffusionstudio/piper-voices/resolve/main";
-// vits-web's OPFS directory. Voices already on disk stay usable.
-const CACHE_DIR = "piper";
 // Both of these are version-pinned CDN paths for packages in package.json, and
 // have to move when those pins do: they serve the .wasm binaries belonging to
 // exactly these builds, and a mismatch fails at instantiation.
@@ -79,7 +78,7 @@ function modelPath(voiceId: string): string {
 async function cacheDir(): Promise<FileSystemDirectoryHandle | null> {
   try {
     const root = await navigator.storage.getDirectory();
-    return await root.getDirectoryHandle(CACHE_DIR, { create: true });
+    return await root.getDirectoryHandle(VOICE_CACHE_DIR, { create: true });
   } catch {
     // No OPFS, or storage denied. Synthesis still works, it just re-downloads.
     return null;
