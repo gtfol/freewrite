@@ -11,6 +11,7 @@
 
 import { buildTextIndex, type TextIndex } from "@/lib/highlights";
 import {
+  endsWithAbbreviation,
   planSpeech,
   RISE_REVISION,
   type ChunkRole,
@@ -133,7 +134,26 @@ function sentenceSpans(text: string, from: number, to: number): Sentence[] {
       raw.push(span);
     }
   }
-  return raw.flatMap((span) =>
+  // Intl follows UAX #29, which has no abbreviation dictionary: a period, a
+  // space and a capital is a sentence break by rule, so "…said Mr. Smith."
+  // arrives here as two. Left alone that becomes two chunks — a full pause and
+  // a terminal fall on "Mr." — whenever the first half is long enough to escape
+  // the short-fragment fold below.
+  //
+  // Rejoining can only ever cost a pause: an abbreviation that really did end a
+  // sentence produces one long chunk instead of two, and splitLong divides it
+  // again if it runs past the limit.
+  const joined: Span[] = [];
+  for (const span of raw) {
+    const previous = joined[joined.length - 1];
+    if (previous && endsWithAbbreviation(text.slice(previous.start, previous.end))) {
+      joined[joined.length - 1] = { start: previous.start, end: span.end };
+    } else {
+      joined.push(span);
+    }
+  }
+
+  return joined.flatMap((span) =>
     splitLong(text, span).map((part, i) => ({ ...part, continues: i > 0 }))
   );
 }

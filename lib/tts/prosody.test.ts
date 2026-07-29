@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  endsWithAbbreviation,
   planSpeech,
   scalesFor,
   seriesRises,
@@ -166,6 +167,66 @@ test("isolates one phrase per sentence, the longest", () => {
 test("terminates and isolates in the same pass", () => {
   const result = plan("Why the numbers were wrong", { emphasis: "numbers" });
   assert.equal(result.text, "Why the, numbers, were wrong.");
+});
+
+// espeak reads "Mr." correctly and then plants a full stop after it, which
+// Piper delivers as a fall and a pause mid-sentence. Dropping the period keeps
+// the expansion and loses the stop.
+test("takes the stop out of an abbreviation the voice would pause on", () => {
+  assert.equal(
+    plan("He met Mr. Smith yesterday.").text,
+    "He met Mr Smith yesterday."
+  );
+  assert.equal(
+    plan("She asked Dr. Chen and Prof. Ito about it.").text,
+    "She asked Dr Chen and Prof Ito about it."
+  );
+});
+
+test("keeps every word addressable after removing a period", () => {
+  const text = "He met Mr. Smith yesterday.";
+  const result = plan(text);
+  assert.deepEqual(spoken(text, result), [
+    "He",
+    "met",
+    "Mr",
+    "Smith",
+    "yesterday",
+  ]);
+});
+
+test("leaves a real sentence break alone", () => {
+  // "sat" is a word, not an abbreviation, and this period ends a sentence — the
+  // reason the list may only ever hold words that are never sentences.
+  assert.equal(plan("He sat. Then he stood.").text, "He sat. Then he stood.");
+  assert.equal(plan("She waited. Nobody came.").text, "She waited. Nobody came.");
+});
+
+test("keeps the stop when the abbreviation ends the line", () => {
+  assert.equal(plan("The witness was a Dr.").text, "The witness was a Dr.");
+});
+
+test("recognizes what is not the end of a sentence", () => {
+  for (const text of [
+    "…said Mr.",
+    "she asked Dr.",
+    "the initial was J.",
+    "common examples, e.g.",
+    "he moved to the U.S.",
+    "she holds a Ph.D.",
+  ]) {
+    assert.ok(endsWithAbbreviation(text), `${text} should not end a sentence`);
+  }
+
+  for (const text of [
+    "He sat.",
+    "Nobody came.",
+    "It cost $4.50.",
+    "a question?",
+    "no punctuation at all",
+  ]) {
+    assert.ok(!endsWithAbbreviation(text), `${text} does end a sentence`);
+  }
 });
 
 test("plans the same sentence the same way every time", () => {

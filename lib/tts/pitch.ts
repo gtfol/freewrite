@@ -89,6 +89,24 @@ const VOICED_CORRELATION = 0.4;
 // twice its first formant, a sibilant at several times that, whether or not it
 // is voiced.
 const MAX_ZERO_CROSSING_RATE = 0.12;
+
+// The 25ms window that makes the periodicity test trustworthy is too long to
+// place a boundary with: it stops calling a frame voiced while a fifth of it is
+// still vowel. That left ten to twenty milliseconds of un-raised vowel after
+// the rise, so the voice climbed a tone, stepped back down for a syllable's
+// tail, and then hit the consonant. In "eyes" the leftover lands inside the
+// /z/, where there is nothing much to hear it in; in "gas" it is the last of a
+// short, fully voiced vowel, which is why one sounded fixed and the other
+// still sounded wrong.
+//
+// So the coarse pass finds the run and a short window walks its end forward to
+// where voicing actually stops. Crossing rate alone here: 4ms is far too short
+// to measure a period in, and the only question left at the boundary is
+// whether the consonant has started. The window looks forward from the point
+// being judged, so the error is one-sided — it stops a few milliseconds early
+// rather than a few late, and early is the harmless direction.
+const EDGE_WINDOW = 0.004;
+const EDGE_STEP = 0.001;
 // Relative to the span's own peak, so this tracks the speaker rather than an
 // absolute level the two engines would disagree about.
 const VOICED_LEVEL_RATIO = 0.06;
@@ -149,6 +167,36 @@ function examine(
   return { level, periodic: best, crossings: crossings / window };
 }
 
+// Walks forward from a point known to be voiced to the last one that still is.
+// `floor` is not a refinement: silence crosses zero no times at all, so crossing
+// rate on its own calls a pause the most voiced thing in the chunk and walks
+// straight through it to the end of the span.
+function voicingEnds(
+  audio: Float32Array,
+  from: number,
+  limit: number,
+  sampleRate: number,
+  floor: number
+): number {
+  const window = Math.max(2, Math.round(sampleRate * EDGE_WINDOW));
+  const step = Math.max(1, Math.round(sampleRate * EDGE_STEP));
+
+  let end = from;
+  for (let at = from; at + window <= limit; at += step) {
+    let crossings = 0;
+    let energy = 0;
+    for (let i = 0; i < window; i++) {
+      const sample = audio[at + i];
+      energy += sample * sample;
+      if (i > 0 && sample < 0 !== audio[at + i - 1] < 0) crossings++;
+    }
+    if (Math.sqrt(energy / window) < floor) break;
+    if (crossings / (window - 1) > MAX_ZERO_CROSSING_RATE) break;
+    end = at + step;
+  }
+  return Math.min(limit, end);
+}
+
 // The last stretch of voiced audio in the span — which is both where the rise
 // belongs and the only place it can safely be put.
 //
@@ -203,15 +251,19 @@ function voicedRun(
   let start = end;
   while (start > 0 && voiced[start - 1]) start--;
 
+  // A frame is a verdict on a whole window, so voicing ends somewhere inside
+  // the last one rather than at the far side of it. This point is still inside
+  // it and therefore still voiced, which is what `voicingEnds` needs to start
+  // from; it then walks the rest of the way at a resolution the coarse pass
+  // cannot offer.
+  const inside = Math.min(
+    to,
+    frames[end].at + (end + 1 < frames.length ? hop : window)
+  );
+
   return {
     start: frames[start].at,
-    // A frame is a verdict on a whole window, so the voicing ends somewhere
-    // inside the last one rather than at the far side of it. When there is an
-    // unvoiced frame after it, stop where that frame's window opens: it gives
-    // up a few milliseconds of real vowel to guarantee that no part of the
-    // fricative is ever inside the segment, which is the trade that matters
-    // here. With nothing after it there is nothing to run into.
-    end: Math.min(to, frames[end].at + (end + 1 < frames.length ? hop : window)),
+    end: voicingEnds(audio, inside, to, sampleRate, floor),
   };
 }
 

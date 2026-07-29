@@ -74,7 +74,11 @@ const TERMINATED = /[.!?…:;,—–][\s"'”’)\]]*$/;
 // 3: periodicity alone still admitted the voiced fricatives — "eyes", not just
 //    "gas" — since decimating for the correlation low-passes their hiss away.
 //    Crossing rate now has to agree.
-export const RISE_REVISION = 3;
+// 4: the rise stopped ten to twenty milliseconds short of where voicing ended,
+//    so the tone stepped back down over the last of the vowel. Inaudible in
+//    "eyes", plain in "gas". The run's end is now walked to the boundary at
+//    millisecond resolution.
+export const RISE_REVISION = 4;
 
 // A coordinated series needs at least this many items before the rise is worth
 // having. Two items joined by "and" usually carry no comma at all.
@@ -126,9 +130,61 @@ export function scalesFor(role: ChunkRole, text: string): Scales {
   };
 }
 
-interface Insert {
+// One rewrite of the displayed text on its way to the phonemizer. `length` is
+// how much it replaces, so the same machinery covers a comma put in and a
+// period taken out.
+interface Edit {
   at: number;
+  length: number;
   text: string;
+}
+
+// Words espeak expands correctly and then puts a full stop after. "He met Mr.
+// Smith" phonemizes as `mˈɪstɚ.smˈɪθ`, and that dot is a clause terminator:
+// Piper falls and pauses on it, in the middle of a sentence. Dropping the
+// period keeps the expansion and loses the stop — "Mr Smith" is `mˈɪstɚ smˈɪθ`.
+//
+// Deliberately only words that are never a sentence of their own. The period
+// after "sat" in "He sat. Then he stood." is a real one, and the two are
+// indistinguishable from here — both are a word, a period, a space and a
+// capital — so the list is the whole of the safety and stays short. Anything
+// that doubles as an ordinary English word is left out however common the
+// abbreviation is.
+const ABBREVIATIONS = new Set([
+  "mr", "mrs", "ms", "mx", "dr", "prof", "rev", "fr", "msgr", "sr", "jr",
+  "capt", "sgt", "lt", "adm", "maj", "gov", "sen", "supt", "hon",
+  "dept", "approx", "vs", "viz", "cf",
+]);
+
+// A run of one- or two-letter pieces each followed by a dot: "e.g.", "U.S.",
+// "Ph.D.", or the initials in "J. R. R. Tolkien". Used for sentence
+// segmentation only — espeak already reads these without planting a stop.
+const DOTTED = /^(?:\p{L}{1,2}\.){2,}$/u;
+
+// Whether the last thing in `text` is an abbreviation rather than the end of a
+// sentence. The segmenter needs this: Intl follows UAX #29, which has no
+// abbreviation dictionary and breaks at "Mr." before a capital because that is
+// what the rule says.
+export function endsWithAbbreviation(text: string): boolean {
+  const token = /(\S+)$/.exec(text)?.[1];
+  if (!token || !token.endsWith(".")) return false;
+  if (DOTTED.test(token)) return true;
+
+  const word = token.slice(0, -1);
+  // A lone capital is an initial, not a sentence.
+  if (word.length === 1) return /\p{Lu}/u.test(word);
+  return ABBREVIATIONS.has(word.toLowerCase());
+}
+
+// Only mid-sentence: a period with nothing after it is ending something, and
+// an abbreviation that genuinely closes a sentence keeps its stop.
+function abbreviationEdits(text: string): Edit[] {
+  const edits: Edit[] = [];
+  for (const match of text.matchAll(/(\p{L}+)\.(?=\s)/gu)) {
+    if (!ABBREVIATIONS.has(match[1].toLowerCase())) continue;
+    edits.push({ at: match.index + match[1].length, length: 1, text: "" });
+  }
+  return edits;
 }
 
 // The items of a coordinated series — "toast, eggs, bacon, and milk" — as the
@@ -184,7 +240,7 @@ function trimSpan(text: string, span: WordSpan): WordSpan {
 // One phrase per sentence, always the longest: a sentence with three bolded
 // words in it turns into a stutter if all three are isolated, and the sentence
 // that needed the help is usually the one with a single phrase carrying it.
-function emphasisInserts(text: string, spans: WordSpan[]): Insert[] {
+function emphasisInserts(text: string, spans: WordSpan[]): Edit[] {
   let best: WordSpan | null = null;
 
   for (const raw of spans) {
@@ -207,28 +263,29 @@ function emphasisInserts(text: string, spans: WordSpan[]): Insert[] {
   if (open === 0) return [];
 
   return [
-    { at: open, text: "," },
-    { at: best.end, text: "," },
+    { at: open, length: 0, text: "," },
+    { at: best.end, length: 0, text: "," },
   ];
 }
 
-function applyInserts(text: string, inserts: Insert[]): string {
+function applyEdits(text: string, edits: Edit[]): string {
   let out = "";
   let at = 0;
-  for (const insert of inserts) {
-    out += text.slice(at, insert.at) + insert.text;
-    at = insert.at;
+  for (const edit of edits) {
+    out += text.slice(at, edit.at) + edit.text;
+    at = edit.at + edit.length;
   }
   return out + text.slice(at);
 }
 
-// How far a position moves once the inserts are applied. A word's start counts
-// an insert sitting exactly on it and its end does not, so the comma that
-// closes an emphasis lands outside the word it follows rather than inside it.
-function shift(inserts: Insert[], at: number, isStart: boolean): number {
+// How far a position moves once the edits are applied. A word's start counts
+// an edit sitting exactly on it and its end does not, so the comma that closes
+// an emphasis lands outside the word it follows rather than inside it — and a
+// period removed after a word leaves that word's own span alone.
+function shift(edits: Edit[], at: number, isStart: boolean): number {
   let delta = 0;
-  for (const insert of inserts) {
-    if (isStart ? insert.at <= at : insert.at < at) delta += insert.text.length;
+  for (const edit of edits) {
+    if (isStart ? edit.at <= at : edit.at < at) delta += edit.text.length - edit.length;
   }
   return delta;
 }
@@ -271,8 +328,15 @@ export function planSpeech(input: SpeechInput): SpeechPlan {
   // A series is already punctuated into units, and isolating one of its items
   // between two more commas would only single out a member of a list for no
   // reason. The rise is the whole intervention here.
-  const inserts = rises.length > 0 ? [] : emphasisInserts(text, input.emphasis.map(local));
-  let speech = applyInserts(text, inserts);
+  const emphasis =
+    rises.length > 0 ? [] : emphasisInserts(text, input.emphasis.map(local));
+  // Sorted because the two kinds are found independently and `applyEdits`
+  // walks the text once. They cannot overlap: an emphasis comma goes where a
+  // word ends, an abbreviation's period is the character after one.
+  const edits = [...abbreviationEdits(text), ...emphasis].sort(
+    (a, b) => a.at - b.at
+  );
+  let speech = applyEdits(text, edits);
 
   // An unterminated clause is delivered as one: the voice reaches the last
   // word and simply stops, with no final fall. Headings, list items and table
@@ -283,8 +347,8 @@ export function planSpeech(input: SpeechInput): SpeechPlan {
   return {
     text: speech,
     words: words.map((word) => ({
-      start: word.start + shift(inserts, word.start, true),
-      end: word.end + shift(inserts, word.end, false),
+      start: word.start + shift(edits, word.start, true),
+      end: word.end + shift(edits, word.end, false),
     })),
     // Keyed off the displayed text rather than the speech text, so adding an
     // emphasis to a sentence doesn't also change its tempo.

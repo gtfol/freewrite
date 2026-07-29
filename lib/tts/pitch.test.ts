@@ -246,6 +246,29 @@ test("still lifts the diphthong before a voiced fricative", () => {
   );
 });
 
+// "gas": a short, fully voiced vowel running straight into /s/. Leaving even
+// ten milliseconds of it un-raised means the voice climbs a tone and steps
+// back down before the consonant, which is audible on a vowel in a way it
+// isn't inside the /z/ of "eyes".
+test("leaves no un-raised vowel between the rise and the consonant", () => {
+  for (const ms of [100, 140, 200, 260]) {
+    const vowel = voiced(120, ms / 1000);
+    const audio = concat(vowel, fricative(0.12));
+    const raised = applyRises(audio, RATE, [{ from: 0, to: (ms + 120) / 1000 }]);
+
+    let last = -1;
+    for (let i = 0; i < audio.length; i++) if (raised[i] !== audio[i]) last = i;
+    assert.notEqual(last, -1, `no rise applied to a ${ms}ms vowel`);
+
+    // Under half a period at 120Hz, so there is no pitch to step back down to.
+    const leftover = ((vowel.length - 1 - last) / RATE) * 1000;
+    assert.ok(
+      leftover >= 0 && leftover < 4,
+      `${leftover.toFixed(1)}ms of un-raised vowel after a ${ms}ms vowel`
+    );
+  }
+});
+
 test("declines an item that is all fricative", () => {
   const audio = concat(voiced(120, 0.1), fricative(0.3));
   const raised = applyRises(audio, RATE, [{ from: 0.1, to: 0.4 }]);
