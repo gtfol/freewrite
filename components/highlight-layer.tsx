@@ -17,6 +17,35 @@ const MAX_NOTE_CHARS = 4_000;
 
 const CARD_WIDTH = 288;
 
+// Room the pill needs on a side before it will go there, and how close to the
+// top of the screen a selection has to be before the phone gives up on putting
+// its own menu above it.
+const PILL_HEIGHT = 56;
+const NATIVE_MENU = 88;
+// The reader nav is fixed to the bottom of the screen and would sit on top of
+// a pill placed under a selection near the fold.
+const NAV_HEIGHT = 96;
+
+// Which side of the selection the pill goes on. Phones draw the system's
+// Copy / Look Up bar directly over the space above a selection — where this
+// pill used to be — so on touch the pill goes below instead.
+//
+// Both iOS and Android flip that bar below the selection when the selection is
+// near the top of the screen and there's no room above it. The pill flips with
+// it: whichever side the phone took, ours takes the other.
+type Place = "above" | "below";
+
+function placeFor(rect: DOMRect): Place {
+  const coarse =
+    typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+  // A mouse gets no system menu to dodge, and above the selection is where a
+  // Medium-style pill belongs.
+  if (!coarse) return "above";
+  if (rect.top < NATIVE_MENU) return "above";
+  const below = window.innerHeight - NAV_HEIGHT - rect.bottom;
+  return below >= PILL_HEIGHT ? "below" : "above";
+}
+
 // Measured when a panel opens — render must not touch refs, so the wrapper
 // width travels with the position.
 interface Pos {
@@ -24,6 +53,7 @@ interface Pos {
   top: number;
   bottom: number;
   width: number;
+  place: Place;
 }
 
 type Panel =
@@ -45,6 +75,9 @@ function relativeTo(wrap: HTMLElement, rect: DOMRect): Pos {
     top: rect.top - w.top,
     bottom: rect.bottom - w.top,
     width: w.width,
+    // Decided here, against the viewport, while the rect is still in viewport
+    // coordinates — the rest of Pos is relative to the wrapper.
+    place: placeFor(rect),
   };
 }
 
@@ -196,12 +229,17 @@ export function HighlightLayer({
   if (!panel) return null;
   const { width } = panel.pos;
 
+  const above = panel.pos.place === "above";
+
   const pill = (children: ReactNode) => (
     <div
       data-hl-ui
       onMouseDown={(e) => e.preventDefault()}
-      className="absolute z-50 -translate-x-1/2 -translate-y-full"
-      style={{ left: clamp(panel.pos.x, 56, width - 56), top: panel.pos.top - 8 }}
+      className={`absolute z-50 -translate-x-1/2 ${above ? "-translate-y-full" : ""}`}
+      style={{
+        left: clamp(panel.pos.x, 56, width - 56),
+        top: above ? panel.pos.top - 8 : panel.pos.bottom + 8,
+      }}
     >
       <div className="flex items-center rounded-full bg-foreground px-1 py-0.5 text-background shadow-lg">
         {children}
