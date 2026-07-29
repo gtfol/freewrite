@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test lib/**/*.test.ts"
+    "test": "node --test \"lib/**/*.test.ts\""
   },
   "dependencies": {
     "@diffusionstudio/piper-wasm": "1.0.0",

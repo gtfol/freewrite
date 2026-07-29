@@ -404,6 +404,91 @@
   }
 }
 
+/* A Spotify track, before and after it's been asked for. Outside .preview
+   because a shared entry renders these too, and they're the same size there —
+   unlike an image, whose whole job changes between the two. */
+.spotify-chip,
+.spotify-embed {
+  /* Sits on the text baseline rather than on its own line: the song usually
+     arrives mid-thought, inside the sentence that mentions it. */
+  display: inline-flex;
+  vertical-align: middle;
+  margin-block: 0.35em;
+  max-width: 100%;
+}
+
+.spotify-chip {
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.45em 0.7em 0.45em 0.5em;
+  border-radius: var(--radius);
+  background: var(--color-muted);
+  font-size: 0.9em;
+  line-height: 1.35;
+  cursor: pointer;
+  transition: opacity 150ms;
+}
+
+.spotify-chip:hover,
+.spotify-chip:focus-visible {
+  opacity: 0.8;
+}
+
+.spotify-glyph {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9em;
+  height: 1.9em;
+  border-radius: calc(var(--radius) - 3px);
+  /* Spotify's own green, the one place this app borrows a brand colour: it's
+     what makes the card legible as a player rather than a link. Fixed rather
+     than theme-aware for the same reason. */
+  background: #1db954;
+}
+
+.spotify-glyph::after {
+  content: "";
+  border-style: solid;
+  border-width: 0.36em 0 0.36em 0.6em;
+  border-color: transparent transparent transparent #000;
+  margin-left: 0.15em;
+}
+
+.spotify-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.spotify-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.spotify-sub {
+  font-size: 0.8em;
+  color: var(--color-muted-foreground);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Spotify's compact player is 152px tall and fluid up to the column. */
+.spotify-embed {
+  width: 100%;
+  max-width: 420px;
+}
+
+.spotify-embed iframe {
+  width: 100%;
+  height: 152px;
+  border: 0;
+  border-radius: 12px;
+}
+
 /* Syntax colors for highlighted code in the markdown preview (highlight.js
    token classes), mapped onto the theme-aware --syntax-* palette. */
 .hljs-comment,
