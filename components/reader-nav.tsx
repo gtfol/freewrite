@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Moon, Settings, Sun } from "lucide-react";
+import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import {
@@ -272,10 +272,9 @@ export function ReaderNav({
             <button
               type="button"
               onClick={() => setStorageOpen(true)}
-              title="Storage"
-              className={`flex items-center ${itemClass}`}
+              className={itemClass}
             >
-              <Settings className="size-4" />
+              Settings
             </button>
           </>
         )}
