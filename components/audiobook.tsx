@@ -17,6 +17,8 @@ import {
   normOffsetAtPoint,
   paintOverlay,
   rangeForSpan,
+  SEEK_SENTENCE_HIGHLIGHT,
+  SEEK_WORD_HIGHLIGHT,
   SENTENCE_HIGHLIGHT,
   setHighlight,
   WORD_HIGHLIGHT,
@@ -48,6 +50,48 @@ function formatTime(seconds: number): string {
   const total = Math.floor(seconds);
   const minutes = Math.floor(total / 60);
   return `${minutes}:${String(total % 60).padStart(2, "0")}`;
+}
+
+// Where a point in the article would send the voice: the sentence under the
+// cursor, and the word inside it that playback would pick up from. Shared by
+// the click that performs the seek and the hover that previews it, so the
+// preview can never promise something the click doesn't do.
+interface SeekTarget {
+  chunkIndex: number;
+  // -1 until the chunk has been generated: word times arrive with the audio,
+  // and without them a click lands at the top of the sentence — which is then
+  // exactly what the preview shows.
+  wordIndex: number;
+  time: number;
+}
+
+function seekTargetAt(
+  index: TextIndex,
+  chunks: StoredChunk[],
+  x: number,
+  y: number
+): SeekTarget | null {
+  const offset = normOffsetAtPoint(index, x, y);
+  if (offset === null) return null;
+
+  const chunkIndex = chunks.findIndex((chunk) => offset < chunk.normEnd);
+  if (chunkIndex === -1) return null;
+
+  const chunk = chunks[chunkIndex];
+  if (!chunk.wordTimes) return { chunkIndex, wordIndex: -1, time: 0 };
+
+  let wordIndex = -1;
+  for (let w = 0; w < chunk.words.length; w++) {
+    if (chunk.words[w].start <= offset) wordIndex = w;
+    else break;
+  }
+  return { chunkIndex, wordIndex, time: chunk.wordTimes[wordIndex] ?? 0 };
+}
+
+// Text the seek layer should keep its hands off: these have their own click
+// behaviour, and previewing a jump under the cursor there would be a lie.
+function inert(target: EventTarget | null): boolean {
+  return !!(target as HTMLElement | null)?.closest("a, [data-hl-chip], button");
 }
 
 // A stored choice only counts if it still exists — voices removed from the
@@ -85,6 +129,7 @@ export function Audiobook({
   const indexRef = useRef<TextIndex | null>(null);
   const chunksRef = useRef<StoredChunk[]>([]);
   const paintedRef = useRef("");
+  const previewRef = useRef("");
   const lastUiRef = useRef(0);
   const nativePaint = useRef(false);
 
@@ -130,6 +175,17 @@ export function Audiobook({
     },
     [wrapRef]
   );
+
+  const clearPreview = useCallback(() => {
+    if (!previewRef.current) return;
+    previewRef.current = "";
+    if (nativePaint.current) {
+      setHighlight(SEEK_SENTENCE_HIGHLIGHT, []);
+      setHighlight(SEEK_WORD_HIGHLIGHT, []);
+    } else if (wrapRef.current) {
+      clearOverlay(wrapRef.current, "seek");
+    }
+  }, [wrapRef]);
 
   const onPosition = useCallback(
     (position: Position) => {
@@ -211,8 +267,11 @@ export function Audiobook({
       generatorRef.current = null;
       clearHighlight(WORD_HIGHLIGHT);
       clearHighlight(SENTENCE_HIGHLIGHT);
+      clearHighlight(SEEK_WORD_HIGHLIGHT);
+      clearHighlight(SEEK_SENTENCE_HIGHLIGHT);
       if (wrap) clearOverlay(wrap);
       paintedRef.current = "";
+      previewRef.current = "";
       void collectGarbage();
     };
     // `speed` is applied imperatively below; re-running here would rebuild the
@@ -233,39 +292,120 @@ export function Audiobook({
       if (!player || !index) return;
       if (player.getState() === "idle") return;
 
-      const target = event.target as HTMLElement | null;
-      if (target?.closest("a, [data-hl-chip], button")) return;
+      if (inert(event.target)) return;
       if (!window.getSelection()?.isCollapsed) return;
 
-      const offset = normOffsetAtPoint(index, event.clientX, event.clientY);
-      if (offset === null) return;
-
-      const chunks = chunksRef.current;
-      let chunkIndex = -1;
-      for (let i = 0; i < chunks.length; i++) {
-        if (offset < chunks[i].normEnd) {
-          chunkIndex = i;
-          break;
-        }
-      }
-      if (chunkIndex === -1) return;
-
-      // Land on the clicked word when its timing is known, so clicking deep
+      // Lands on the clicked word when its timing is known, so clicking deep
       // into a long sentence doesn't restart the whole sentence.
-      const chunk = chunks[chunkIndex];
-      let into = 0;
-      if (chunk.wordTimes) {
-        for (let w = 0; w < chunk.words.length; w++) {
-          if (chunk.words[w].start <= offset) into = chunk.wordTimes[w] ?? 0;
-          else break;
-        }
-      }
-      player.seekToChunk(chunkIndex, into);
+      const target = seekTargetAt(
+        index,
+        chunksRef.current,
+        event.clientX,
+        event.clientY
+      );
+      if (target) player.seekToChunk(target.chunkIndex, target.time);
     };
 
     root.addEventListener("click", onClick);
     return () => root.removeEventListener("click", onClick);
   }, [contentRef]);
+
+  // Hover preview. Click-to-seek is invisible until someone tries it, so the
+  // article shows where a click would land before it's clicked: the sentence
+  // that would start speaking, and the word inside it the voice would resume
+  // from. Paired with the pointer cursor below — together they're the only
+  // thing telling a reader the text is clickable at all.
+  useEffect(() => {
+    const root = contentRef.current;
+    if (!root) return;
+
+    let frame = 0;
+    let point: { x: number; y: number } | null = null;
+
+    const draw = () => {
+      frame = 0;
+      const index = indexRef.current;
+      const player = playerRef.current;
+      const chunks = chunksRef.current;
+      // Same conditions the click honours: no transport, no preview.
+      if (!point || !index || !player || player.getState() === "idle") {
+        clearPreview();
+        return;
+      }
+
+      const target = seekTargetAt(index, chunks, point.x, point.y);
+      if (!target) {
+        clearPreview();
+        return;
+      }
+
+      const signature = `${target.chunkIndex}:${target.wordIndex}`;
+      if (previewRef.current === signature) return;
+      previewRef.current = signature;
+
+      const chunk = chunks[target.chunkIndex];
+      const word =
+        target.wordIndex >= 0 ? chunk.words[target.wordIndex] : undefined;
+      const wordRange = word ? rangeForSpan(index, word.start, word.end) : null;
+      const sentenceRange = rangeForSpan(index, chunk.normStart, chunk.normEnd);
+
+      if (nativePaint.current) {
+        setHighlight(
+          SEEK_SENTENCE_HIGHLIGHT,
+          sentenceRange ? [sentenceRange] : []
+        );
+        setHighlight(SEEK_WORD_HIGHLIGHT, wordRange ? [wordRange] : []);
+      } else if (wrapRef.current) {
+        // The rectangle fallback gets one layer, so it draws the word — the
+        // half of the preview that says something the cursor doesn't.
+        paintOverlay(wrapRef.current, wordRange ?? sentenceRange, "seek");
+      }
+    };
+
+    const onMove = (event: MouseEvent) => {
+      // Mid-drag the reader is selecting text to annotate, not aiming at a
+      // word; the click declines to seek there and the preview follows it.
+      if (inert(event.target) || !window.getSelection()?.isCollapsed) {
+        point = null;
+      } else {
+        point = { x: event.clientX, y: event.clientY };
+      }
+      // caretPositionFromPoint is more work than a mousemove deserves, and a
+      // mouse can fire several per frame. One lookup per frame looks identical.
+      if (!frame) frame = requestAnimationFrame(draw);
+    };
+
+    const onLeave = () => {
+      point = null;
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      clearPreview();
+    };
+
+    root.addEventListener("mousemove", onMove);
+    root.addEventListener("mouseleave", onLeave);
+    return () => {
+      root.removeEventListener("mousemove", onMove);
+      root.removeEventListener("mouseleave", onLeave);
+      if (frame) cancelAnimationFrame(frame);
+      clearPreview();
+    };
+  }, [contentRef, wrapRef, clearPreview]);
+
+  // The other half of the affordance. Only while there is something to seek —
+  // before the first play, the article is for reading and keeps its text
+  // cursor.
+  useEffect(() => {
+    const root = contentRef.current;
+    if (!root) return;
+    if (playerState === "idle") {
+      root.removeAttribute("data-tts-seekable");
+      clearPreview();
+      return;
+    }
+    root.setAttribute("data-tts-seekable", "");
+    return () => root.removeAttribute("data-tts-seekable");
+  }, [contentRef, playerState, clearPreview]);
 
   const playing = playerState === "playing" || playerState === "buffering";
 

@@ -8,6 +8,7 @@
 // Silence between chunks lives here and nowhere else. The audio itself is
 // trimmed clean, so every pause in the reading is one this scheduler placed.
 
+import { timeStretch } from "@/lib/tts/stretch";
 import { buildTimeline, wordIndexAt } from "@/lib/tts/timing";
 import type { Samples } from "@/lib/tts/codec";
 import type { StoredChunk } from "@/lib/tts/types";
@@ -54,6 +55,10 @@ export class AudiobookPlayer {
   private gain: GainNode | null = null;
   private chunks: StoredChunk[] = [];
   private scheduled: Scheduled[] = [];
+  // Decoded audio at its natural length, and the same audio stretched to the
+  // current speed. Two caches because a speed change invalidates the second
+  // but not the first, and re-decoding Opus to change speed would be waste.
+  private decoded = new Map<number, { audio: Samples; sampleRate: number }>();
   private buffers = new Map<number, AudioBuffer>();
   private state: PlayerState = "idle";
   private speed = 1;
@@ -111,25 +116,46 @@ export class AudiobookPlayer {
     return this.ctx;
   }
 
-  private async buffer(index: number): Promise<AudioBuffer | null> {
-    const cached = this.buffers.get(index);
+  private evict(cache: Map<number, unknown>) {
+    if (cache.size < BUFFER_CACHE) return;
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+
+  private async samples(
+    index: number
+  ): Promise<{ audio: Samples; sampleRate: number } | null> {
+    const cached = this.decoded.get(index);
     if (cached) return cached;
 
     const decoded = await this.fetchAudio(index);
     if (!decoded) return null;
 
+    this.evict(this.decoded);
+    this.decoded.set(index, decoded);
+    return decoded;
+  }
+
+  // The buffer handed to the scheduler is always played at rate 1: speed lives
+  // in the samples themselves, stretched by timeStretch, because playbackRate
+  // would take the voice's pitch up with it.
+  private async buffer(index: number): Promise<AudioBuffer | null> {
+    const cached = this.buffers.get(index);
+    if (cached) return cached;
+
+    const decoded = await this.samples(index);
+    if (!decoded) return null;
+
+    const audio = timeStretch(decoded.audio, decoded.sampleRate, this.speed);
     const ctx = this.audioContext();
     const buffer = ctx.createBuffer(
       1,
-      Math.max(1, decoded.audio.length),
+      Math.max(1, audio.length),
       decoded.sampleRate
     );
-    buffer.copyToChannel(decoded.audio, 0);
+    buffer.copyToChannel(audio, 0);
 
-    if (this.buffers.size >= BUFFER_CACHE) {
-      const oldest = this.buffers.keys().next().value;
-      if (oldest !== undefined) this.buffers.delete(oldest);
-    }
+    this.evict(this.buffers);
     this.buffers.set(index, buffer);
     return buffer;
   }
@@ -162,15 +188,18 @@ export class AudiobookPlayer {
         }
         if (this.halted()) return;
 
+        // Offsets are content seconds — where we are in the sentence as
+        // written — while the stretched buffer runs in wall seconds, which are
+        // shorter by the speed factor.
         const offset = this.nextOffset;
         const start = Math.max(this.nextTime, ctx.currentTime + 0.01);
+        const into = Math.min(offset / this.speed, buffer.duration);
         const source = ctx.createBufferSource();
         source.buffer = buffer;
-        source.playbackRate.value = this.speed;
         source.connect(this.gain ?? ctx.destination);
-        source.start(start, Math.min(offset, buffer.duration));
+        source.start(start, into);
 
-        const end = start + (buffer.duration - offset) / this.speed;
+        const end = start + (buffer.duration - into);
         this.scheduled.push({ index, start, end, offset, source });
 
         this.nextTime = end + this.gapSeconds(index);
@@ -324,6 +353,9 @@ export class AudiobookPlayer {
     if (speed === this.speed) return;
     const { index, offset } = this.resumeAt;
     this.speed = speed;
+    // Stretched at the old speed, so worthless now; the decoded originals
+    // survive and get re-stretched on demand.
+    this.buffers.clear();
     if (this.state === "playing" || this.state === "buffering") {
       this.startFrom(index, offset);
     }
@@ -342,6 +374,7 @@ export class AudiobookPlayer {
     cancelAnimationFrame(this.frame);
     this.frame = 0;
     this.buffers.clear();
+    this.decoded.clear();
     void this.ctx?.close();
     this.ctx = null;
     this.gain = null;
