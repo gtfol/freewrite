@@ -94,24 +94,8 @@ function seekTargetAt(
 
 // Text the seek layer should keep its hands off: these have their own click
 // behaviour, and previewing a jump under the cursor there would be a lie.
-//
-// Links are the exception on touch. A fingertip covers several words, so a
-// link caught under a tap meant for the sentence around it would leave the
-// article — opening the source in a new tab, which reads as the reader having
-// navigated away from itself. While there is a transport to seek, the article
-// is a seek surface first and links go back to being text.
-function inert(target: EventTarget | null, linksSeek: boolean): boolean {
-  const element = target as HTMLElement | null;
-  if (element?.closest("[data-hl-chip], button")) return true;
-  return !linksSeek && !!element?.closest("a");
-}
-
-// Touch has no hover and no precision; both are what the link exception turns
-// on. Read per event rather than once — a tablet can gain a mouse.
-function coarsePointer(): boolean {
-  return (
-    typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches
-  );
+function inert(target: EventTarget | null): boolean {
+  return !!(target as HTMLElement | null)?.closest("a, [data-hl-chip], button");
 }
 
 // A stored choice only counts if it still exists — voices removed from the
@@ -321,7 +305,7 @@ export function Audiobook({
       if (!player || !index) return;
       if (player.getState() === "idle") return;
 
-      if (inert(event.target, coarsePointer())) return;
+      if (inert(event.target)) return;
       if (!window.getSelection()?.isCollapsed) return;
 
       // Lands on the clicked word when its timing is known, so clicking deep
@@ -332,12 +316,7 @@ export function Audiobook({
         event.clientX,
         event.clientY
       );
-      if (!target) return;
-      // The seek is the whole answer to this click. Said out loud because a
-      // link may be underneath it, and following it is what this handler just
-      // decided not to do.
-      event.preventDefault();
-      player.seekToChunk(target.chunkIndex, target.time);
+      if (target) player.seekToChunk(target.chunkIndex, target.time);
     };
 
     root.addEventListener("click", onClick);
@@ -399,10 +378,7 @@ export function Audiobook({
     const onMove = (event: MouseEvent) => {
       // Mid-drag the reader is selecting text to annotate, not aiming at a
       // word; the click declines to seek there and the preview follows it.
-      if (
-        inert(event.target, coarsePointer()) ||
-        !window.getSelection()?.isCollapsed
-      ) {
+      if (inert(event.target) || !window.getSelection()?.isCollapsed) {
         point = null;
       } else {
         point = { x: event.clientX, y: event.clientY };
