@@ -415,7 +415,7 @@ export function HighlightLayer({
       body = card(
         <>
           <p className="text-sm whitespace-pre-wrap">{hl.note}</p>
-          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+          <div className="mt-3 flex items-center gap-4 text-xs">
             <button
               type="button"
               className={cardAction}
@@ -438,13 +438,13 @@ export function HighlightLayer({
             >
               Delete comment
             </button>
-            {/* Named for what it takes, and asked about before it takes it. */}
+            {/* What it takes is the dialog's to say, not the row's. */}
             <button
               type="button"
-              className="text-muted-foreground transition-colors hover:text-destructive"
+              className={cardAction}
               onClick={() => setConfirming(noteId)}
             >
-              Remove highlight & comment
+              Remove highlight
             </button>
           </div>
         </>
