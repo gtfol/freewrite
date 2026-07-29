@@ -304,6 +304,10 @@ export interface SpeechInput {
   // Author emphasis intersecting this chunk, clamped to it, in the same
   // document coordinates as `words`.
   emphasis: WordSpan[];
+  // Stretches with no pronunciation — a URL, a hash, an id — in the same
+  // coordinates again. They are cut out of what the engine is given, and their
+  // words have already been left out of `words`. See lib/tts/speakable.ts.
+  drop: WordSpan[];
 }
 
 export interface SpeechPlan {
@@ -329,17 +333,35 @@ export function planSpeech(input: SpeechInput): SpeechPlan {
 
   const words = input.words.map(local);
   const rises = seriesRises(text, words);
+
+  const drops = input.drop
+    .map(local)
+    .map((span) => ({ at: span.start, length: span.end - span.start, text: "" }));
+  const inside = (at: number) =>
+    drops.some((drop) => at >= drop.at && at < drop.at + drop.length);
+
   // A series is already punctuated into units, and isolating one of its items
   // between two more commas would only single out a member of a list for no
   // reason. The rise is the whole intervention here.
   const emphasis =
-    rises.length > 0 ? [] : emphasisInserts(text, input.emphasis.map(local));
-  // Sorted because the two kinds are found independently and `applyEdits`
-  // walks the text once. They cannot overlap: an emphasis comma goes where a
-  // word ends, an abbreviation's period is the character after one.
-  const edits = [...abbreviationEdits(text), ...emphasis].sort(
-    (a, b) => a.at - b.at
-  );
+    rises.length > 0
+      ? []
+      : emphasisInserts(
+          text,
+          // Emphasis on something that is being cut has nothing left to fall
+          // on, and an insert inside a removal would overlap it.
+          input.emphasis
+            .map(local)
+            .filter((span) => !inside(span.start) && !inside(span.end - 1))
+        );
+  // Sorted because the kinds are found independently and `applyEdits` walks
+  // the text once. Abbreviation periods and emphasis commas sit at word
+  // boundaries, and neither can land inside a drop after the filter above.
+  const edits = [
+    ...drops,
+    ...abbreviationEdits(text).filter((edit) => !inside(edit.at)),
+    ...emphasis,
+  ].sort((a, b) => a.at - b.at);
   let speech = applyEdits(text, edits);
 
   // An unterminated clause is delivered as one: the voice reaches the last

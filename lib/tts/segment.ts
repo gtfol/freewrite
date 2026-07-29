@@ -17,6 +17,7 @@ import {
   type ChunkRole,
   type SpeechPlan,
 } from "@/lib/tts/prosody";
+import { speakable, unspeakableSpans } from "@/lib/tts/speakable";
 import type { Chunk, Scales, WordSpan } from "@/lib/tts/types";
 
 // Read-aloud skips what only makes sense on screen. Block code is noise read
@@ -339,23 +340,51 @@ export async function segmentArticle(
     }
   }
 
+  // Everything unsayable goes before the gaps are worked out, so a pause lands
+  // between the chunks that survive rather than around a hole where one used
+  // to be. A span that was the tail of a divided sentence stops being one when
+  // the head it continued is gone.
+  const spoken: Sentence[] = [];
+  const spokenBlocks: (Element | null)[] = [];
+  let dropped = false;
+  for (let i = 0; i < spans.length; i++) {
+    if (!speakable(text.slice(spans[i].start, spans[i].end))) {
+      dropped = true;
+      continue;
+    }
+    spoken.push(dropped ? { ...spans[i], continues: false } : spans[i]);
+    spokenBlocks.push(blocks[i]);
+    dropped = false;
+  }
+
   const chunks = await Promise.all(
-    spans.map(async (span, i) => {
+    spoken.map(async (span, i) => {
       const body = text.slice(span.start, span.end);
-      const words = wordSpans(text, span);
+      // Tokens with no pronunciation, in document coordinates. Their words are
+      // left out of the chunk entirely: a word nobody is going to say has no
+      // business being highlighted as though someone were.
+      const drop = unspeakableSpans(body).map((range) => ({
+        start: span.start + range.start,
+        end: span.start + range.end,
+      }));
+      const words = wordSpans(text, span).filter(
+        (word) =>
+          !drop.some((range) => word.start < range.end && word.end > range.start)
+      );
       const plan = planSpeech({
         text: body,
         words,
         normStart: span.start,
         // A continuation is mid-sentence whatever block it sits in, so it wins
         // over the block's own role.
-        role: span.continues ? "clause" : roleOf(blocks[i]),
+        role: span.continues ? "clause" : roleOf(spokenBlocks[i]),
         emphasis: emphasis
           .filter((mark) => mark.start < span.end && mark.end > span.start)
           .map((mark) => ({
             start: Math.max(mark.start, span.start),
             end: Math.min(mark.end, span.end),
           })),
+        drop,
       });
 
       return {
@@ -370,9 +399,9 @@ export async function segmentArticle(
         rises: plan.rises,
         gapAfter: gapBetween(
           rules,
-          blocks[i],
-          blocks[i + 1] ?? null,
-          spans[i + 1]?.continues ?? false
+          spokenBlocks[i],
+          spokenBlocks[i + 1] ?? null,
+          spoken[i + 1]?.continues ?? false
         ),
       } satisfies Chunk;
     })

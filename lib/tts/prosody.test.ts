@@ -26,7 +26,12 @@ function words(text: string, normStart = 0): WordSpan[] {
 
 function plan(
   text: string,
-  options: { role?: ChunkRole; emphasis?: string; normStart?: number } = {}
+  options: {
+    role?: ChunkRole;
+    emphasis?: string;
+    normStart?: number;
+    drop?: { start: number; end: number }[];
+  } = {}
 ) {
   const normStart = options.normStart ?? 0;
   const at = options.emphasis ? text.indexOf(options.emphasis) : -1;
@@ -46,6 +51,7 @@ function plan(
               end: normStart + at + (options.emphasis as string).length,
             },
           ],
+    drop: options.drop ?? [],
   });
 }
 
@@ -145,6 +151,7 @@ test("isolates one phrase per sentence, the longest", () => {
         end: text.indexOf("the numbers") + "the numbers".length,
       },
     ],
+    drop: [],
   });
   assert.equal(
     result.text,
@@ -227,6 +234,27 @@ test("recognizes what is not the end of a sentence", () => {
   ]) {
     assert.ok(!endsWithAbbreviation(text), `${text} does end a sentence`);
   }
+});
+
+// A URL is cut out of the sentence around it rather than spelled out in the
+// middle of it. Its words never reach the plan, so what comes back still names
+// every word it claims to.
+test("cuts an unsayable stretch out of what the engine is given", () => {
+  const text = "See https://example.com/a for details.";
+  const url = text.indexOf("https");
+  const result = planSpeech({
+    text,
+    words: words(text).filter(
+      (word) => word.end <= url || word.start >= url + "https://example.com/a ".length
+    ),
+    normStart: 0,
+    role: "body",
+    emphasis: [],
+    drop: [{ start: url, end: url + "https://example.com/a ".length }],
+  });
+
+  assert.equal(result.text, "See for details.");
+  assert.deepEqual(spoken(text, result), ["See", "for", "details"]);
 });
 
 test("plans the same sentence the same way every time", () => {
@@ -331,6 +359,7 @@ test("plans a list without also isolating one of its items", () => {
     normStart: 0,
     role: "body",
     emphasis: [{ start: text.indexOf("bacon"), end: text.indexOf("bacon") + 5 }],
+    drop: [],
   });
   assert.equal(result.text, text);
   assert.equal(result.rises.length, 3);
