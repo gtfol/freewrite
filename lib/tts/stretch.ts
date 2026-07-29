@@ -22,8 +22,16 @@ import type { Samples } from "@/lib/tts/codec";
 // Long enough to hold a pitch period of a low voice (85Hz is ~12ms), short
 // enough not to smear plosives.
 const FRAME_SECONDS = 0.045;
-// How far the splice point may travel to find a better match — a bit over one
-// period of the lowest speech pitch, which is all the search needs.
+// How far the splice point may travel to find a better match.
+//
+// 8ms is one period at 125Hz, so for a low voice this cannot reach a whole
+// period and the splice is misaligned by the remainder. Widening it to 13ms to
+// cover an 85Hz voice was tried and measured, and it does not help: with only
+// 15ms of correlation and a coarse stride, the extra range finds spurious
+// peaks about as often as it finds the right one, and low voices came back no
+// better while high ones got worse. The wobble on a pitch ramp is WSOLA
+// meeting a signal whose period is changing under it, which a bigger search
+// does not address. lib/tts/pitch.ts keeps its ramps short for that reason.
 const SEARCH_SECONDS = 0.008;
 // Only the head of the overlap is correlated; matching further ahead costs
 // time and tells us nothing the first few milliseconds didn't.

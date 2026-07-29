@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Loader2, Pause, Play } from "lucide-react";
 
 import {
@@ -148,6 +154,16 @@ export function Audiobook({
   const [playerState, setPlayerState] = useState<PlayerState>("idle");
   const [display, setDisplay] = useState({ time: 0, total: 0 });
   const [pinned, setPinned] = useState(false);
+  // What a click on the track would land on. The track's own width rides along
+  // because the card has to be kept inside it, and reading it back during
+  // render would be a layout measurement on every frame.
+  const [scrubPreview, setScrubPreview] = useState<{
+    at: number;
+    track: number;
+    time: number;
+    text: string;
+  } | null>(null);
+  const [cardWidth, setCardWidth] = useState(0);
 
   const generatorRef = useRef<AudiobookGenerator | null>(null);
   const playerRef = useRef<AudiobookPlayer | null>(null);
@@ -155,6 +171,7 @@ export function Audiobook({
   const chunksRef = useRef<StoredChunk[]>([]);
   const paintedRef = useRef("");
   const previewRef = useRef("");
+  const previewCardRef = useRef<HTMLDivElement | null>(null);
   const lastUiRef = useRef(0);
   const nativePaint = useRef(false);
 
@@ -482,13 +499,68 @@ export function Audiobook({
     void generatorRef.current?.pin().then(() => setPinned(true));
   };
 
+  // Where along the track the cursor is, as a fraction of the article. The
+  // track has vertical padding only, so its box is the same width as the bar
+  // drawn inside it and one measurement serves both.
+  const ratioAt = (event: React.MouseEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return null;
+    return Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  };
+
   const scrub = (event: React.MouseEvent<HTMLDivElement>) => {
     const player = playerRef.current;
-    if (!player || display.total <= 0) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const ratio = (event.clientX - rect.left) / rect.width;
-    player.seekToTime(Math.max(0, Math.min(1, ratio)) * display.total);
+    const ratio = ratioAt(event);
+    if (!player || ratio === null || display.total <= 0) return;
+    player.seekToTime(ratio * display.total);
   };
+
+  // The same lookup the seek performs, so the preview can never promise a
+  // sentence the click doesn't land on — the rule the article-hover preview
+  // already follows.
+  // Mouse only, and deliberately. Previewing a seek is a thing you do with a
+  // cursor you can move without committing; a finger has no hover, a tap just
+  // seeks, and the compatibility mouse events a tap synthesizes would leave a
+  // card sitting over the transport with no pointer-leave ever coming to clear
+  // it.
+  const previewScrub = (event: React.PointerEvent<HTMLDivElement>) => {
+    const chunks = chunksRef.current;
+    const ratio = event.pointerType === "mouse" ? ratioAt(event) : null;
+    if (ratio === null || display.total <= 0 || chunks.length === 0) {
+      setScrubPreview(null);
+      return;
+    }
+
+    const time = ratio * display.total;
+    const { starts } = buildTimeline(chunks);
+    let index = 0;
+    for (let i = 0; i < starts.length; i++) {
+      if (starts[i] <= time) index = i;
+      else break;
+    }
+
+    const track = event.currentTarget.getBoundingClientRect().width;
+    setScrubPreview({ at: ratio * track, track, time, text: chunks[index].text });
+  };
+
+  // Measured rather than guessed, and in a layout effect so the correction
+  // lands before the frame is painted. Clamping against the previous
+  // sentence's card was visibly wrong: a long sentence following a short one
+  // hung off the end of the track by however much the two differed.
+  useLayoutEffect(() => {
+    if (previewCardRef.current) {
+      setCardWidth(previewCardRef.current.offsetWidth);
+    }
+  }, [scrubPreview?.text]);
+
+  // Pushed off the cursor near the ends so it always sits over the track. A
+  // card wider than the track itself can only be centred.
+  const previewLeft = (() => {
+    if (!scrubPreview) return 0;
+    const { at, track } = scrubPreview;
+    if (cardWidth >= track) return track / 2;
+    return Math.max(cardWidth / 2, Math.min(track - cardWidth / 2, at));
+  })();
 
   const voice = voiceId ? findVoice(voiceId) : undefined;
   const progress = display.total > 0 ? display.time / display.total : 0;
@@ -560,14 +632,43 @@ export function Audiobook({
   return (
     <div className="border-t border-border/60">
       <div className="mx-auto flex max-w-[650px] flex-col gap-2 px-6 pt-3">
+        {/* Padded vertically so the bar keeps its hairline look while the
+            pointer gets something it can actually hit, and the negative margin
+            gives that back to the layout. */}
         <div
           onClick={scrub}
-          className="group h-1 w-full cursor-pointer rounded-full bg-border"
+          onPointerMove={previewScrub}
+          onPointerLeave={() => setScrubPreview(null)}
+          onPointerCancel={() => setScrubPreview(null)}
+          className="group relative -my-2 w-full cursor-pointer py-2"
         >
-          <div
-            className="h-full rounded-full bg-foreground/60 transition-[width] duration-200"
-            style={{ width: `${Math.min(100, progress * 100)}%` }}
-          />
+          {scrubPreview && (
+            <div
+              ref={previewCardRef}
+              style={{ left: previewLeft }}
+              className="pointer-events-none absolute bottom-full z-10 mb-2 w-max max-w-[min(20rem,100%)] -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-popover-foreground shadow-md"
+            >
+              <div className="text-[11px] tabular-nums text-muted-foreground">
+                {formatTime(scrubPreview.time)}
+              </div>
+              <div className="line-clamp-3 text-[12px] leading-snug">
+                {scrubPreview.text}
+              </div>
+            </div>
+          )}
+
+          <div className="relative h-1 w-full rounded-full bg-border">
+            <div
+              className="h-full rounded-full bg-foreground/60 transition-[width] duration-200"
+              style={{ width: `${Math.min(100, progress * 100)}%` }}
+            />
+            {scrubPreview && (
+              <div
+                style={{ left: scrubPreview.at }}
+                className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 rounded-full bg-foreground"
+              />
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-2 text-[13px] sm:gap-3">

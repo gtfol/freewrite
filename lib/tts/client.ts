@@ -275,9 +275,10 @@ export class AudiobookGenerator {
       const request: WorkerRequest = {
         type: "synth",
         key: chunk.key,
-        text: chunk.text,
-        normStart: chunk.normStart,
-        words: chunk.words,
+        speech: chunk.speech,
+        speechWords: chunk.speechWords,
+        scales: chunk.scales,
+        rises: chunk.rises,
       };
       this.worker?.postMessage(request);
     });
