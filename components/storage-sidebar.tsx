@@ -13,7 +13,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { formatBytes, storageSlices, type StorageSlice } from "@/lib/tts/size";
+import {
+  formatBytes,
+  sliceWidths,
+  storageSlices,
+  type StorageSlice,
+} from "@/lib/tts/size";
 import {
   clearCache,
   removeAllDownloads,
@@ -99,7 +104,7 @@ export function StorageSidebar({
   };
 
   const slices = report ? storageSlices(report) : [];
-  const stored = slices.reduce((sum, slice) => sum + slice.bytes, 0);
+  const widths = report ? sliceWidths(slices, report.quotaBytes) : [];
   const downloads = slices.find((slice) => slice.key === "downloads");
 
   return (
@@ -128,15 +133,16 @@ export function StorageSidebar({
         </div>
 
         <div className="px-4">
+          {/* The unfilled remainder is the free space, which is why nothing
+              here draws it: the track showing through is the point. */}
           <div className="flex h-2 w-full overflow-hidden rounded-full bg-border">
-            {stored > 0 &&
-              slices.map((slice) => (
-                <div
-                  key={slice.key}
-                  className={SLICE_COLOR[slice.key]}
-                  style={{ width: `${(slice.bytes / stored) * 100}%` }}
-                />
-              ))}
+            {slices.map((slice, i) => (
+              <div
+                key={slice.key}
+                className={SLICE_COLOR[slice.key]}
+                style={{ width: `${widths[i]}%` }}
+              />
+            ))}
           </div>
 
           <ul className="mt-4 flex flex-col gap-2">

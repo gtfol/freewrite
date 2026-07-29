@@ -47,10 +47,6 @@ export interface StorageSlice {
   bytes: number;
 }
 
-// The bar divides up what this site stores, not the disk. An origin's quota
-// runs to tens of gigabytes, so measured against it every slice worth looking
-// at would round to a hairline — the free figure is better said in words.
-//
 // `other` is everything the origin holds that isn't audio or a voice: entries,
 // articles, highlights. It is clamped at zero because the two figures come
 // from different places — usage is the browser's rounded estimate of the whole
@@ -77,6 +73,27 @@ export function storageSlices(report: {
       bytes: Math.max(0, report.usageBytes - ours),
     },
   ];
+}
+
+// Widths as a share of everything that could be stored, so the unfilled part
+// of the bar is the space still free. Measured against what has been stored
+// instead, the bar sits at 100% while gigabytes are still available, which
+// reads as a device about to run out.
+//
+// The slices are usually a hairline at this scale. That is the honest picture:
+// the legend carries the figures, and the bar is there to say how little of
+// the whole this amounts to.
+export function sliceWidths(
+  slices: StorageSlice[],
+  quotaBytes: number
+): number[] {
+  const stored = slices.reduce((sum, slice) => sum + slice.bytes, 0);
+  // A quota of zero means the browser wouldn't estimate. Falling back to the
+  // composition draws a full bar, which is wrong, but a bar of nothing next to
+  // real figures looks broken.
+  const capacity = Math.max(quotaBytes, stored);
+  if (capacity <= 0) return slices.map(() => 0);
+  return slices.map((slice) => (slice.bytes / capacity) * 100);
 }
 
 // One unit, no decimals below a gigabyte. This is a number someone glances at

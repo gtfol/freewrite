@@ -7,7 +7,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { audioSizes, bookBytes, formatBytes, storageSlices } from "./size.ts";
+import {
+  audioSizes,
+  bookBytes,
+  formatBytes,
+  sliceWidths,
+  storageSlices,
+} from "./size.ts";
 import type { Audiobook, StoredChunk } from "./types.ts";
 
 const KB = 1024;
@@ -97,6 +103,44 @@ test("storageSlices survives an origin storing nothing at all", () => {
     usageBytes: 0,
   });
   assert.deepEqual(slices.map((slice) => slice.bytes), [0, 0, 0, 0]);
+});
+
+// The regression this exists to prevent: 61MB stored against a 2GB quota is a
+// nearly empty bar. Divided by what is stored rather than what could be, it is
+// a full one, which reads as a device out of space next to a line saying 1.9GB
+// is free.
+test("sliceWidths measures against the quota, not against itself", () => {
+  const slices = storageSlices({
+    audioBytes: 1 * MB,
+    clearableBytes: 1 * MB,
+    voiceBytes: 60 * MB,
+    usageBytes: 61 * MB,
+  });
+  const widths = sliceWidths(slices, 2 * GB);
+  const filled = widths.reduce((sum, width) => sum + width, 0);
+  assert.ok(filled > 2.9 && filled < 3.0, `expected ~2.98%, got ${filled}`);
+  assert.ok(widths[0] > widths[2], "voices dominate what little is filled");
+});
+
+test("sliceWidths falls back to the composition with no quota to divide by", () => {
+  const slices = storageSlices({
+    audioBytes: 40 * MB,
+    clearableBytes: 40 * MB,
+    voiceBytes: 60 * MB,
+    usageBytes: 100 * MB,
+  });
+  const filled = sliceWidths(slices, 0).reduce((sum, w) => sum + w, 0);
+  assert.ok(Math.abs(filled - 100) < 0.001, `expected 100%, got ${filled}`);
+});
+
+test("sliceWidths returns zeros rather than NaN for an empty origin", () => {
+  const slices = storageSlices({
+    audioBytes: 0,
+    clearableBytes: 0,
+    voiceBytes: 0,
+    usageBytes: 0,
+  });
+  assert.deepEqual(sliceWidths(slices, 0), [0, 0, 0, 0]);
 });
 
 test("formatBytes picks one unit and no decimals below a gigabyte", () => {
