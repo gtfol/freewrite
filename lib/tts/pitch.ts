@@ -23,6 +23,17 @@
 // touching pitch. The acceleration ramps rather than steps, because what a
 // listener hears as "more is coming" is the movement, not the height.
 //
+// It only ever runs on voiced audio, and that restriction is load bearing
+// rather than tidy. WSOLA hides its splices by landing them on pitch-period
+// boundaries; noise has no periods, so on a fricative the similarity search
+// picks an arbitrary offset and overlap-adds noise onto itself, which comes
+// out as a short metallic buzz. Choosing the segment by loudness put /s/ and
+// /t/ inside it — a fricative is among the loudest things in a sentence — and
+// produced exactly that, rarely, on whichever items happened to end unvoiced.
+// Periodicity is the test that tells them apart, and it agrees with the
+// linguistics: the tone of "toast" is carried by the diphthong, and the /st/
+// after it has no pitch to move in the first place.
+//
 // Relative imports with extensions, so this runs under `npm test` without a
 // bundler. See pitch.test.ts.
 
@@ -41,14 +52,34 @@ const MIN_RISE_SECONDS = 0.09;
 // continuation.
 const MAX_RISE_SECONDS = 0.3;
 
-// Crossfade at each edge of a treated segment. Long enough to hide a WSOLA
-// seam, short enough not to eat into the movement itself.
-const EDGE_SECONDS = 0.004;
+// Crossfade where the lifted segment meets the audio around it.
+//
+// Asymmetric, because the two edges are not the same problem. At the head the
+// ramp is still at rate 1 and WSOLA's first window is unmoved, so the lifted
+// audio and the original are the same samples and a long fade blends identical
+// content. At the tail they have drifted out of phase, and fading between two
+// phase-shifted copies of a periodic signal is comb filtering — audible as a
+// hollowness that gets worse the longer it runs. So: fade in gently, cut away
+// quickly.
+const HEAD_SECONDS = 0.006;
+const TAIL_SECONDS = 0.002;
 
-const FRAME_SECONDS = 0.01;
+// Voicing detection. The window has to hold two periods of a low voice (85Hz
+// is ~12ms each) for autocorrelation to find one.
+const VOICING_WINDOW = 0.025;
+const VOICING_HOP = 0.01;
+// The correlation only needs the voice band, so it runs on audio decimated by
+// this much — 6kHz of bandwidth for a search that tops out at 400Hz.
+const DECIMATION = 4;
+const MIN_F0 = 60;
+const MAX_F0 = 400;
+// Normalized autocorrelation at the best lag. Voiced speech sits well above
+// this; a fricative, which is noise with a spectral tilt, sits well below it
+// however loud it happens to be.
+const VOICED_CORRELATION = 0.4;
 // Relative to the span's own peak, so this tracks the speaker rather than an
 // absolute level the two engines would disagree about.
-const SILENCE_RATIO = 0.08;
+const VOICED_LEVEL_RATIO = 0.06;
 
 // A stretch of audio to lift, in seconds from the start of the chunk.
 export interface RiseSpan {
@@ -56,33 +87,107 @@ export interface RiseSpan {
   to: number;
 }
 
-// Where the item stops sounding. The span handed in runs to the start of the
-// next word, so it carries the comma's pause on the end; ramping through that
-// spends most of the movement somewhere nothing can be heard.
-function voicedEnd(
+// How loud one window is, and how periodic.
+//
+// Decimated by a box filter before the correlation rather than by picking
+// every fourth sample: taking every fourth sample folds the energy of a
+// fricative straight down into the band being searched, where it can look
+// convincingly periodic. Averaging first is a crude low-pass, and crude is
+// enough — the question is only voiced or not.
+function examine(
+  audio: Float32Array,
+  at: number,
+  window: number,
+  sampleRate: number
+): { level: number; periodic: number } {
+  let energy = 0;
+  for (let i = 0; i < window; i++) energy += audio[at + i] * audio[at + i];
+  const level = Math.sqrt(energy / window);
+
+  const count = Math.floor(window / DECIMATION);
+  const band = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    let sum = 0;
+    for (let d = 0; d < DECIMATION; d++) sum += audio[at + i * DECIMATION + d];
+    band[i] = sum / DECIMATION;
+  }
+
+  const rate = sampleRate / DECIMATION;
+  const lowLag = Math.max(2, Math.floor(rate / MAX_F0));
+  const highLag = Math.min(count - 2, Math.ceil(rate / MIN_F0));
+
+  let best = 0;
+  for (let lag = lowLag; lag <= highLag; lag++) {
+    let dot = 0;
+    let here = 0;
+    let there = 0;
+    for (let i = 0; i + lag < count; i++) {
+      dot += band[i] * band[i + lag];
+      here += band[i] * band[i];
+      there += band[i + lag] * band[i + lag];
+    }
+    const norm = Math.sqrt(here * there);
+    if (norm > 1e-12) best = Math.max(best, dot / norm);
+  }
+  return { level, periodic: best };
+}
+
+// The last stretch of voiced audio in the span — which is both where the rise
+// belongs and the only place it can safely be put.
+//
+// Belongs, because an English continuation rise is carried by the voiced
+// nucleus: the tone of "toast" lives in the diphthong, and the /st/ after it
+// has no pitch to move. Safely, because WSOLA restores duration by splicing at
+// pitch-period boundaries, and a fricative has none — the similarity search
+// picks an arbitrary offset and overlap-adds noise onto itself, which is heard
+// as a short metallic buzz. Loudness cannot tell the two apart, since /s/ is
+// among the loudest things in a sentence. Periodicity can.
+function voicedRun(
   audio: Float32Array,
   from: number,
   to: number,
   sampleRate: number
-): number {
-  const frame = Math.max(1, Math.round(sampleRate * FRAME_SECONDS));
-  const levels: number[] = [];
+): { start: number; end: number } | null {
+  const window = Math.max(2, Math.round(sampleRate * VOICING_WINDOW));
+  const hop = Math.max(1, Math.round(sampleRate * VOICING_HOP));
+  if (to - from < window) return null;
+
+  const frames: { at: number; level: number; periodic: number }[] = [];
   let peak = 0;
-
-  for (let at = from; at < to; at += frame) {
-    const end = Math.min(to, at + frame);
-    let sum = 0;
-    for (let i = at; i < end; i++) sum += audio[i] * audio[i];
-    const level = Math.sqrt(sum / Math.max(1, end - at));
-    levels.push(level);
-    peak = Math.max(peak, level);
+  for (let at = from; at + window <= to; at += hop) {
+    const frame = examine(audio, at, window, sampleRate);
+    frames.push({ at, ...frame });
+    peak = Math.max(peak, frame.level);
   }
-  if (peak === 0) return from;
+  if (frames.length === 0 || peak === 0) return null;
 
-  const floor = peak * SILENCE_RATIO;
-  let last = levels.length - 1;
-  while (last > 0 && levels[last] < floor) last--;
-  return Math.min(to, from + (last + 1) * frame);
+  const floor = peak * VOICED_LEVEL_RATIO;
+  const voiced = frames.map(
+    (frame) => frame.level >= floor && frame.periodic >= VOICED_CORRELATION
+  );
+
+  let end = -1;
+  for (let i = voiced.length - 1; i >= 0; i--) {
+    if (voiced[i]) {
+      end = i;
+      break;
+    }
+  }
+  if (end === -1) return null;
+
+  let start = end;
+  while (start > 0 && voiced[start - 1]) start--;
+
+  return {
+    start: frames[start].at,
+    // A frame is a verdict on a whole window, so the voicing ends somewhere
+    // inside the last one rather than at the far side of it. When there is an
+    // unvoiced frame after it, stop where that frame's window opens: it gives
+    // up a few milliseconds of real vowel to guarantee that no part of the
+    // fricative is ever inside the segment, which is the trade that matters
+    // here. With nothing after it there is nothing to run into.
+    end: Math.min(to, frames[end].at + (end + 1 < frames.length ? hop : window)),
+  };
 }
 
 // One segment, lifted, at exactly the length it arrived.
@@ -90,7 +195,7 @@ function raise(
   segment: Float32Array,
   sampleRate: number,
   semitones: number
-): Float32Array {
+): Float32Array | null {
   const n = segment.length;
   const top = Math.pow(2, semitones / 12);
 
@@ -109,17 +214,13 @@ function raise(
     warped[count++] = segment[i] + (segment[i + 1] - segment[i]) * (phase - i);
     phase += rate;
   }
-  if (count < 2) return segment.slice();
+  if (count < 2) return null;
 
   const restored = timeStretch(warped.subarray(0, count), sampleRate, count / n);
-
-  // The caller gets back exactly the samples it gave up. WSOLA rounds, and on
-  // the rounding that comes up short the original audio is what fills the tail
-  // — never silence, which would be audible where a rounding error is not.
-  const out = new Float32Array(n);
-  out.set(segment);
-  out.set(restored.subarray(0, Math.min(n, restored.length)));
-  return out;
+  // Anything but the exact length back would have to be padded or spliced, and
+  // both are audible where no rise at all is not. WSOLA returns the length it
+  // was asked for, so this is a guard rather than a case.
+  return restored.length === n ? restored : null;
 }
 
 function blend(
@@ -128,10 +229,11 @@ function blend(
   from: number,
   sampleRate: number
 ): void {
-  const edge = Math.max(1, Math.round(sampleRate * EDGE_SECONDS));
+  const head = Math.max(1, Math.round(sampleRate * HEAD_SECONDS));
+  const tail = Math.max(1, Math.round(sampleRate * TAIL_SECONDS));
   const n = raised.length;
   for (let i = 0; i < n; i++) {
-    const weight = Math.min(1, i / edge, (n - 1 - i) / edge);
+    const weight = Math.min(1, i / head, (n - 1 - i) / tail);
     out[from + i] = out[from + i] * (1 - weight) + raised[i] * weight;
   }
 }
@@ -152,19 +254,25 @@ export function applyRises(
 
   for (const span of spans) {
     const limit = Math.min(audio.length, Math.round(span.to * sampleRate));
-    // Long items get the rise on their last syllable rather than all the way
+    const from = Math.max(0, Math.round(span.from * sampleRate));
+    if (limit - from < shortest) continue;
+
+    const run = voicedRun(out, from, limit, sampleRate);
+    if (!run) continue;
+
+    // Long items take the rise on their last syllable rather than all the way
     // back to the start of the word.
     const opens = Math.max(
-      0,
-      Math.round(span.from * sampleRate),
-      limit - Math.round(MAX_RISE_SECONDS * sampleRate)
+      run.start,
+      run.end - Math.round(MAX_RISE_SECONDS * sampleRate)
     );
-    if (limit - opens < shortest) continue;
+    // A voiced run too short to move the tone through is left alone. Missing
+    // the rise on one item of a list is a reading; a fifty-millisecond burst
+    // of something else is not.
+    if (run.end - opens < shortest) continue;
 
-    const closes = voicedEnd(out, opens, limit, sampleRate);
-    if (closes - opens < shortest) continue;
-
-    blend(out, raise(out.subarray(opens, closes), sampleRate, semitones), opens, sampleRate);
+    const raised = raise(out.subarray(opens, run.end), sampleRate, semitones);
+    if (raised) blend(out, raised, opens, sampleRate);
   }
   return out;
 }

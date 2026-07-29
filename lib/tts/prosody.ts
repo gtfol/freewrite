@@ -62,6 +62,17 @@ const MIN_CONTEXT_CHARS = 6;
 // quotes and brackets after it.
 const TERMINATED = /[.!?…:;,—–][\s"'”’)\]]*$/;
 
+// Bumped when the shape of the rise changes, since that changes the audio
+// without changing anything else about the plan. Only chunks that carry a rise
+// are keyed on it, so a correction here costs the sentences with lists in them
+// rather than every sentence anyone has ever generated — which matters most to
+// the reader who downloaded an article to listen to somewhere with no network.
+//
+// 2: the rise was being placed by loudness, which put it over the fricative an
+//    item ends on. WSOLA has no pitch periods to splice on there, so it came
+//    out as a short metallic burst. Now placed by periodicity. See pitch.ts.
+export const RISE_REVISION = 2;
+
 // A coordinated series needs at least this many items before the rise is worth
 // having. Two items joined by "and" usually carry no comma at all.
 const MIN_SERIES_ITEMS = 3;

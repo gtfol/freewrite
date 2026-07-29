@@ -10,7 +10,12 @@
 // under a click are all the same coordinate space by construction.
 
 import { buildTextIndex, type TextIndex } from "@/lib/highlights";
-import { planSpeech, type ChunkRole, type SpeechPlan } from "@/lib/tts/prosody";
+import {
+  planSpeech,
+  RISE_REVISION,
+  type ChunkRole,
+  type SpeechPlan,
+} from "@/lib/tts/prosody";
 import type { Chunk, Scales, WordSpan } from "@/lib/tts/types";
 
 // Read-aloud skips what only makes sense on screen. Block code is noise read
@@ -253,6 +258,12 @@ function scaleTag({ length, noise, noiseW }: Scales): string {
   return `${length}/${noise}/${noiseW}`;
 }
 
+// Empty for a chunk with no rise in it, so the revision only ever invalidates
+// the sentences it actually describes.
+function riseTag(rises: number[]): string {
+  return rises.length === 0 ? "" : `${RISE_REVISION}:${rises.join(",")}`;
+}
+
 // Everything that decides what a chunk sounds like, and nothing that doesn't.
 // The scales belong in the key as much as the words do: the same sentence read
 // as a heading and read as a body line are two different recordings, and one
@@ -262,8 +273,8 @@ function scaleTag({ length, noise, noiseW }: Scales): string {
 // cannot contain, so no sentence can spell its way into another chunk's key.
 function chunkKey(plan: SpeechPlan, voiceId: string, model: string) {
   return sha256(
-    `${model}\0${voiceId}\0${scaleTag(plan.scales)}\0${plan.rises.join(
-      ","
+    `${model}\0${voiceId}\0${scaleTag(plan.scales)}\0${riseTag(
+      plan.rises
     )}\0${plan.text}`
   );
 }
@@ -363,8 +374,8 @@ export function contentHash(chunks: Chunk[]): Promise<string> {
     chunks
       .map(
         (c) =>
-          `${c.text}\0${c.speech}\0${scaleTag(c.scales)}\0${c.rises.join(
-            ","
+          `${c.text}\0${c.speech}\0${scaleTag(c.scales)}\0${riseTag(
+            c.rises
           )}\0${c.gapAfter}`
       )
       .join("\n")

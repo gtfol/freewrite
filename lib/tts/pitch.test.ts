@@ -20,6 +20,28 @@ function voiced(f0: number, seconds: number, sampleRate = RATE): Float32Array {
   return audio;
 }
 
+// Deterministic noise, standing in for a fricative: loud, and with no period
+// for WSOLA to splice on. This is the content that has to be left alone.
+function fricative(seconds: number, sampleRate = RATE): Float32Array {
+  const audio = new Float32Array(Math.round(seconds * sampleRate));
+  let seed = 0x2f6e2b1;
+  for (let i = 0; i < audio.length; i++) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    audio[i] = (seed / 0x100000000) * 1.2 - 0.6;
+  }
+  return audio;
+}
+
+function concat(...parts: Float32Array[]): Float32Array {
+  const out = new Float32Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}
+
 // Autocorrelation over one window, searching the range a speaking voice lives
 // in. Parabolic interpolation on the winning lag, or the estimate quantizes to
 // whole samples and a few percent at these frequencies.
@@ -155,6 +177,63 @@ test("declines a span that is all pause", () => {
   silent.set(audio.subarray(0, Math.round(0.3 * RATE)));
   const raised = applyRises(silent, RATE, [{ from: 0.35, to: 0.6 }]);
   assert.deepEqual(Array.from(raised), Array.from(silent));
+});
+
+// The regression: "toast" is a voiced diphthong followed by /st/, and a
+// fricative is loud enough to pass any level test. WSOLA has no pitch periods
+// to splice on in there, so anything it does to it comes out metallic.
+test("never touches the fricative an item ends on", () => {
+  const voice = voiced(120, 0.3);
+  const hiss = fricative(0.12);
+  const audio = concat(voice, hiss);
+
+  const raised = applyRises(audio, RATE, [{ from: 0, to: 0.42 }]);
+
+  for (let i = voice.length; i < audio.length; i++) {
+    assert.equal(raised[i], audio[i], `sample ${i} of the fricative moved`);
+  }
+});
+
+test("still lifts the vowel before that fricative", () => {
+  const voice = voiced(120, 0.3);
+  const audio = concat(voice, fricative(0.12));
+  const raised = applyRises(audio, RATE, [{ from: 0, to: 0.42 }]);
+
+  const top = pitchAt(raised, Math.round(0.235 * RATE), Math.round(0.29 * RATE));
+  assert.ok(
+    Math.abs(semitonesBetween(120, top) - RISE_SEMITONES) < 0.8,
+    `expected the rise on the vowel, got ${semitonesBetween(120, top).toFixed(2)} semitones`
+  );
+});
+
+test("declines an item that is all fricative", () => {
+  const audio = concat(voiced(120, 0.1), fricative(0.3));
+  const raised = applyRises(audio, RATE, [{ from: 0.1, to: 0.4 }]);
+  assert.deepEqual(Array.from(raised), Array.from(audio));
+});
+
+test("takes the last voiced run, not the first", () => {
+  // A stop in the middle of a word: "bacon" is [beɪ] k [ən].
+  const audio = concat(
+    voiced(120, 0.14),
+    fricative(0.05),
+    voiced(120, 0.16),
+    new Float32Array(Math.round(0.08 * RATE))
+  );
+  const raised = applyRises(audio, RATE, [{ from: 0, to: 0.43 }]);
+
+  // The first run keeps the pitch it had.
+  const early = pitchAt(raised, Math.round(0.06 * RATE), Math.round(0.12 * RATE));
+  assert.ok(
+    Math.abs(semitonesBetween(120, early)) < 0.5,
+    `the earlier syllable moved to ${early.toFixed(1)}Hz`
+  );
+  // The last one carries the tone.
+  const late = pitchAt(raised, Math.round(0.29 * RATE), Math.round(0.345 * RATE));
+  assert.ok(
+    Math.abs(semitonesBetween(120, late) - RISE_SEMITONES) < 0.9,
+    `expected the rise on the final syllable, got ${semitonesBetween(120, late).toFixed(2)} semitones`
+  );
 });
 
 test("puts the movement on the speech when the span ends in a pause", () => {
