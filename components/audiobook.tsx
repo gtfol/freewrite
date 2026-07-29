@@ -50,6 +50,16 @@ const UI_THROTTLE_MS = 250;
 const itemClass =
   "shrink-0 whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground";
 
+// Elements with their own answer to the space bar, which the play/pause
+// shortcut below declines to take it from.
+const HANDLES_SPACE = new Set([
+  "INPUT",
+  "TEXTAREA",
+  "SELECT",
+  "BUTTON",
+  "SUMMARY",
+]);
+
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
   const total = Math.floor(seconds);
@@ -453,6 +463,31 @@ export function Audiobook({
     root.setAttribute("data-tts-seekable", "");
     return () => root.removeAttribute("data-tts-seekable");
   }, [contentRef, playerState, clearPreview]);
+
+  // Space is play/pause, and only while there's a transport to talk to: this
+  // listener is mounted with it, so an article nobody asked to hear keeps the
+  // space bar's page-down. Skipped on a coarse pointer, where a space keystroke
+  // can only have come from an on-screen keyboard — which is to say from a text
+  // field, which is the one place this must not take it from. Read per event
+  // rather than at mount, since a tablet can gain a mouse.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== "Space" || event.repeat) return;
+      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      if (coarsePointer()) return;
+      // Anything that answers a space bar itself keeps it: typing a space into
+      // the title editor, or pressing the focused Play button, which would
+      // otherwise toggle twice and look like nothing happened.
+      const active = document.activeElement as HTMLElement | null;
+      if (active?.isContentEditable) return;
+      if (active && HANDLES_SPACE.has(active.tagName)) return;
+      // The page would scroll otherwise — the default this shortcut replaces.
+      event.preventDefault();
+      playerRef.current?.toggle();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const playing = playerState === "playing" || playerState === "buffering";
 
