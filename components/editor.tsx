@@ -71,14 +71,14 @@ export function Editor() {
   const fontId = usePrefs((s) => s.fontId);
   const fontSize = usePrefs((s) => s.fontSize);
   const backspaceDisabled = usePrefs((s) => s.backspaceDisabled);
-  const markdownPreview = usePrefs((s) => s.markdownPreview);
+  const previewMode = usePrefs((s) => s.previewMode);
 
   const ref = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    ref.current?.focus();
-  }, [entry?.id, markdownPreview]);
+    if (previewMode !== "full") ref.current?.focus();
+  }, [entry?.id, previewMode]);
 
   const applyPlan = useCallback(
     (el: HTMLTextAreaElement, plan: EditPlan) => {
@@ -151,7 +151,7 @@ export function Editor() {
       value={entry.content}
       onChange={(e) => setContent(e.target.value)}
       onKeyDown={onKeyDown}
-      onScroll={markdownPreview ? onScroll : undefined}
+      onScroll={previewMode === "split" ? onScroll : undefined}
       placeholder={placeholder}
       spellCheck={false}
       autoCorrect="off"
@@ -165,7 +165,21 @@ export function Editor() {
     />
   );
 
-  if (!markdownPreview) return textarea;
+  if (previewMode === "off") return textarea;
+
+  const preview = (
+    <MarkdownPreview
+      content={entry.content}
+      fontFamily={font.stack}
+      fontSize={fontSize}
+    />
+  );
+
+  if (previewMode === "full") {
+    return (
+      <div className="no-scrollbar h-full overflow-y-auto">{preview}</div>
+    );
+  }
 
   return (
     <div className="flex h-full">
@@ -174,11 +188,7 @@ export function Editor() {
         ref={previewRef}
         className="no-scrollbar hidden h-full min-w-0 flex-1 overflow-y-auto border-l md:block"
       >
-        <MarkdownPreview
-          content={entry.content}
-          fontFamily={font.stack}
-          fontSize={fontSize}
-        />
+        {preview}
       </div>
     </div>
   );
