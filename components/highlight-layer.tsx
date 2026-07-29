@@ -4,6 +4,16 @@ import { Highlighter, MessageCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode, type RefObject } from "react";
 
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   anchorFromRange,
   applyHighlights,
   clearHighlights,
@@ -81,11 +91,7 @@ interface Pos {
 type Panel =
   | { kind: "select"; pos: Pos; anchor: QuoteAnchor }
   | { kind: "actions"; pos: Pos; id: string }
-  // A note lives on its highlight, so removing the highlight takes the comment
-  // with it — irreversibly, and on every synced device. `armed` is the second
-  // tap that costs asks for: only this card can reach a comment, since a
-  // highlight carrying one always opens here rather than in the plain pill.
-  | { kind: "note"; pos: Pos; id: string; armed: boolean }
+  | { kind: "note"; pos: Pos; id: string }
   | {
       kind: "compose";
       pos: Pos;
@@ -133,6 +139,10 @@ export function HighlightLayer({
   onSave: (highlights: Highlight[]) => void;
 }) {
   const [panel, setPanel] = useState<Panel | null>(null);
+  // The highlight a confirmation dialog is open for. Held apart from the panel
+  // so the card it was opened from stays put underneath and comes back on
+  // Cancel, instead of the dialog riding on a panel that dismisses itself.
+  const [confirming, setConfirming] = useState<string | null>(null);
   const highlights = article.highlights ?? [];
 
   useEffect(() => {
@@ -193,9 +203,7 @@ export function HighlightLayer({
       e.preventDefault();
       const pos = relativeTo(wrap, (chip ?? mark)!.getBoundingClientRect());
       setPanel(
-        hl.note
-          ? { kind: "note", pos, id, armed: false }
-          : { kind: "actions", pos, id }
+        hl.note ? { kind: "note", pos, id } : { kind: "actions", pos, id }
       );
     };
     root.addEventListener("click", onClick);
@@ -203,14 +211,21 @@ export function HighlightLayer({
   }, [contentRef, wrapRef, article.highlights]);
 
   useEffect(() => {
-    if (!panel) return;
+    // A dialog owns the screen while it's up: its own taps and its Escape are
+    // not the outside click that dismisses a panel.
+    if (!panel || confirming) return;
     const onDown = (e: Event) => {
       const t = e.target as Element;
       if (t.closest?.("[data-hl-ui], mark[data-hl], [data-hl-chip]")) return;
       setPanel(null);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPanel(null);
+      // An Escape a dialog already took is marked: it dismisses from a
+      // capture-phase listener and prevents the default, and closing itself is
+      // the whole of what it was asked to do. Detaching on `confirming` isn't
+      // enough on its own — that same Escape re-attaches this listener before
+      // the bubble phase reaches the document.
+      if (e.key === "Escape" && !e.defaultPrevented) setPanel(null);
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("touchstart", onDown);
@@ -220,10 +235,11 @@ export function HighlightLayer({
       document.removeEventListener("touchstart", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [panel]);
+  }, [panel, confirming]);
 
   const commit = (next: Highlight[]) => {
     setPanel(null);
+    setConfirming(null);
     onSave(next);
   };
 
@@ -255,188 +271,225 @@ export function HighlightLayer({
     else setPanel(null);
   };
 
-  if (!panel) return null;
-  const { width } = panel.pos;
+  // Everything floating over the article, built rather than returned: the
+  // dialog below outlives any one panel and has to render beside it.
+  let body: ReactNode = null;
+  if (panel) {
+    const { width } = panel.pos;
 
-  const above = panel.pos.place === "above";
+    const above = panel.pos.place === "above";
 
-  const pill = (children: ReactNode) => (
-    <div
-      data-hl-ui
-      onMouseDown={(e) => e.preventDefault()}
-      className={`absolute z-50 -translate-x-1/2 ${above ? "-translate-y-full" : ""}`}
-      style={{
-        left: clamp(panel.pos.x, 56, width - 56),
-        top: panel.pos.y,
-      }}
-    >
-      <div className="flex items-center rounded-full bg-foreground px-1 py-0.5 text-background shadow-lg">
+    const pill = (children: ReactNode) => (
+      <div
+        data-hl-ui
+        onMouseDown={(e) => e.preventDefault()}
+        className={`absolute z-50 -translate-x-1/2 ${above ? "-translate-y-full" : ""}`}
+        style={{
+          left: clamp(panel.pos.x, 56, width - 56),
+          top: panel.pos.y,
+        }}
+      >
+        <div className="flex items-center rounded-full bg-foreground px-1 py-0.5 text-background shadow-lg">
+          {children}
+        </div>
+      </div>
+    );
+
+    const card = (children: ReactNode) => (
+      <div
+        data-hl-ui
+        className="absolute z-50 rounded-lg border border-border bg-popover p-3 font-sans text-popover-foreground shadow-lg"
+        style={{
+          width: CARD_WIDTH,
+          left: clamp(panel.pos.x - CARD_WIDTH / 2, 0, width - CARD_WIDTH),
+          top: panel.pos.bottom + 8,
+        }}
+      >
         {children}
       </div>
-    </div>
-  );
-
-  const card = (children: ReactNode) => (
-    <div
-      data-hl-ui
-      className="absolute z-50 rounded-lg border border-border bg-popover p-3 font-sans text-popover-foreground shadow-lg"
-      style={{
-        width: CARD_WIDTH,
-        left: clamp(panel.pos.x - CARD_WIDTH / 2, 0, width - CARD_WIDTH),
-        top: panel.pos.bottom + 8,
-      }}
-    >
-      {children}
-    </div>
-  );
-
-  if (panel.kind === "select") {
-    return pill(
-      <>
-        <button
-          type="button"
-          className={pillButton}
-          title="Highlight"
-          aria-label="Highlight"
-          onClick={() => addHighlight(panel.anchor, null)}
-        >
-          <Highlighter className="size-4" />
-        </button>
-        <button
-          type="button"
-          className={pillButton}
-          title="Comment"
-          aria-label="Comment"
-          onClick={() =>
-            setPanel({
-              kind: "compose",
-              pos: panel.pos,
-              id: null,
-              anchor: panel.anchor,
-              draft: "",
-            })
-          }
-        >
-          <MessageCircle className="size-4" />
-        </button>
-      </>
     );
-  }
 
-  if (panel.kind === "actions") {
-    return pill(
-      <>
-        <button
-          type="button"
-          className={pillButton}
-          title="Remove highlight"
-          aria-label="Remove highlight"
-          onClick={() => removeHighlight(panel.id)}
-        >
-          <Highlighter className="size-4" />
-        </button>
-        <button
-          type="button"
-          className={pillButton}
-          title="Comment"
-          aria-label="Comment"
-          onClick={() =>
-            setPanel({
-              kind: "compose",
-              pos: panel.pos,
-              id: panel.id,
-              anchor: null,
-              draft: "",
-            })
-          }
-        >
-          <MessageCircle className="size-4" />
-        </button>
-      </>
-    );
-  }
-
-  if (panel.kind === "compose") {
-    return card(
-      <>
-        <textarea
-          autoFocus
-          value={panel.draft}
-          maxLength={MAX_NOTE_CHARS}
-          onChange={(e) => setPanel({ ...panel, draft: e.target.value })}
-          placeholder="Add a comment…"
-          rows={3}
-          className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
-        />
-        <div className="mt-2 flex items-center justify-end gap-4 text-[13px]">
+    if (panel.kind === "select") {
+      body = pill(
+        <>
           <button
             type="button"
-            className={cardAction}
-            onClick={() => setPanel(null)}
+            className={pillButton}
+            title="Highlight"
+            aria-label="Highlight"
+            onClick={() => addHighlight(panel.anchor, null)}
           >
-            Cancel
+            <Highlighter className="size-4" />
           </button>
           <button
             type="button"
-            disabled={!panel.draft.trim() && !panel.id}
-            className="text-foreground transition-opacity hover:opacity-70 disabled:opacity-40"
-            onClick={saveCompose}
+            className={pillButton}
+            title="Comment"
+            aria-label="Comment"
+            onClick={() =>
+              setPanel({
+                kind: "compose",
+                pos: panel.pos,
+                id: null,
+                anchor: panel.anchor,
+                draft: "",
+              })
+            }
           >
-            Save
+            <MessageCircle className="size-4" />
           </button>
-        </div>
-      </>
-    );
+        </>
+      );
+    }
+
+    if (panel.kind === "actions") {
+      body = pill(
+        <>
+          <button
+            type="button"
+            className={pillButton}
+            title="Remove highlight"
+            aria-label="Remove highlight"
+            onClick={() => removeHighlight(panel.id)}
+          >
+            <Highlighter className="size-4" />
+          </button>
+          <button
+            type="button"
+            className={pillButton}
+            title="Comment"
+            aria-label="Comment"
+            onClick={() =>
+              setPanel({
+                kind: "compose",
+                pos: panel.pos,
+                id: panel.id,
+                anchor: null,
+                draft: "",
+              })
+            }
+          >
+            <MessageCircle className="size-4" />
+          </button>
+        </>
+      );
+    }
+
+    if (panel.kind === "compose") {
+      body = card(
+        <>
+          <textarea
+            autoFocus
+            value={panel.draft}
+            maxLength={MAX_NOTE_CHARS}
+            onChange={(e) => setPanel({ ...panel, draft: e.target.value })}
+            placeholder="Add a comment…"
+            rows={3}
+            className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
+          />
+          <div className="mt-2 flex items-center justify-end gap-4 text-[13px]">
+            <button
+              type="button"
+              className={cardAction}
+              onClick={() => setPanel(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!panel.draft.trim() && !panel.id}
+              className="text-foreground transition-opacity hover:opacity-70 disabled:opacity-40"
+              onClick={saveCompose}
+            >
+              Save
+            </button>
+          </div>
+        </>
+      );
+    }
+
+    // A note whose highlight lost its anchor renders nothing at all.
+    const noteId = panel.kind === "note" ? panel.id : null;
+    const hl = noteId ? highlights.find((h) => h.id === noteId) : undefined;
+    if (noteId && hl?.note) {
+      body = card(
+        <>
+          <p className="text-sm whitespace-pre-wrap">{hl.note}</p>
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+            <button
+              type="button"
+              className={cardAction}
+              onClick={() =>
+                setPanel({
+                  kind: "compose",
+                  pos: panel.pos,
+                  id: noteId,
+                  anchor: null,
+                  draft: hl.note ?? "",
+                })
+              }
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              className={cardAction}
+              onClick={() => saveNote(noteId, null)}
+            >
+              Delete comment
+            </button>
+            {/* Named for what it takes, and asked about before it takes it. */}
+            <button
+              type="button"
+              className="text-muted-foreground transition-colors hover:text-destructive"
+              onClick={() => setConfirming(noteId)}
+            >
+              Remove highlight & comment
+            </button>
+          </div>
+        </>
+      );
+    }
   }
 
-  const hl = highlights.find((h) => h.id === panel.id);
-  if (!hl?.note) return null;
+  // Only a comment gets a dialog. Removing a bare highlight destroys a colour
+  // and is one tap to redo; removing a commented one destroys writing, here
+  // and on every synced device, with nothing that can bring it back.
+  const doomed = highlights.find((h) => h.id === confirming);
+  const quoted =
+    doomed?.note && doomed.note.length > 120
+      ? `${doomed.note.slice(0, 120).trimEnd()}…`
+      : doomed?.note;
+  // Built as one string rather than assembled in JSX, where the line break
+  // either side of an interpolation eats the spaces around it.
+  const consequence = `Its comment${
+    quoted ? ` — “${quoted}” — ` : " "
+  }goes with it, on this device and every synced one. This can’t be undone.`;
 
-  return card(
+  return (
     <>
-      <p className="text-sm whitespace-pre-wrap">{hl.note}</p>
-      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-        <button
-          type="button"
-          className={cardAction}
-          onClick={() =>
-            setPanel({
-              kind: "compose",
-              pos: panel.pos,
-              id: panel.id,
-              anchor: null,
-              draft: hl.note ?? "",
-            })
-          }
-        >
-          Edit
-        </button>
-        <button
-          type="button"
-          className={cardAction}
-          onClick={() => saveNote(panel.id, null)}
-        >
-          Delete comment
-        </button>
-        {/* Named for what it takes, and armed before it takes it. */}
-        <button
-          type="button"
-          className={
-            panel.armed
-              ? "text-destructive"
-              : "text-muted-foreground transition-colors hover:text-destructive"
-          }
-          onClick={() =>
-            panel.armed
-              ? removeHighlight(panel.id)
-              : setPanel({ ...panel, armed: true })
-          }
-        >
-          {panel.armed
-            ? "Deletes the comment too — tap again"
-            : "Remove highlight & comment"}
-        </button>
-      </div>
+      {body}
+      <AlertDialog
+        open={confirming !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirming(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this highlight?</AlertDialogTitle>
+            <AlertDialogDescription>{consequence}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => confirming && removeHighlight(confirming)}
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
