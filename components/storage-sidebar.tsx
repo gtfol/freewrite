@@ -114,7 +114,7 @@ export function StorageSidebar({
           <div>
             <h2 className="text-sm text-foreground">Storage</h2>
             <p className="text-xs text-muted-foreground">
-              what this site keeps on your device
+              what&apos;s saved on this device
             </p>
           </div>
           <button
@@ -161,22 +161,27 @@ export function StorageSidebar({
 
           {report && (
             <p className="mt-4 text-xs text-muted-foreground">
+              {/* "About" carries the hedge the figure needs: a quota is the
+                  browser's estimate of a shared ceiling, fuzzed to resist
+                  fingerprinting, not a measurement of the disk. */}
+              About{" "}
               {formatBytes(Math.max(0, report.quotaBytes - report.usageBytes))}{" "}
-              still available to this site, as the browser estimates it.
-              {!durable && " It may evict downloads if the device runs short."}
+              free.
+              {!durable &&
+                " If the device fills up, the browser may delete some of this without asking."}
             </p>
           )}
         </div>
 
         <Action
           label="Remove all downloads"
-          caption="Deletes the articles you saved to keep. They regenerate the next time you listen."
+          caption="Deletes the audio files you downloaded for your articles."
           disabled={!downloads || downloads.bytes === 0}
           onClick={() => setConfirming("downloads")}
         />
         <Action
           label="Clear cache"
-          caption="Frees space by removing audio you didn't save, and the voice model. Your downloads are kept."
+          caption="Removes stale audio files and the voice models. Your downloads are kept."
           disabled={
             !report || (report.clearableBytes === 0 && report.voiceBytes === 0)
           }
@@ -201,9 +206,8 @@ export function StorageSidebar({
           <AlertDialogHeader>
             <AlertDialogTitle>Remove all downloads?</AlertDialogTitle>
             <AlertDialogDescription>
-              Frees {formatBytes(downloads?.bytes ?? 0)}. The articles stay —
-              only their audio goes, and it regenerates the next time you
-              listen.
+              Frees {formatBytes(downloads?.bytes ?? 0)}. Only the audio is
+              deleted. Your articles are not affected.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -222,14 +226,15 @@ export function StorageSidebar({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Clear the cache?</AlertDialogTitle>
+            {/* The size of the re-download isn't repeated here: the Voices row
+                sits directly above the button that opened this. */}
             <AlertDialogDescription>
               Frees{" "}
               {formatBytes(
                 (report?.clearableBytes ?? 0) + (report?.voiceBytes ?? 0)
               )}
-              . Your downloads are kept. Cached audio comes back as you listen,
-              but the voice is a single {formatBytes(report?.voiceBytes ?? 0)}{" "}
-              download before anything can be read aloud again.
+              . Your downloads are kept. Voice models will download again the
+              next time you listen.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
