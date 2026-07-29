@@ -19,10 +19,10 @@ import { createPiper, type Synthesis } from "@/lib/tts/piper";
 import { synthesizeWithRecovery } from "@/lib/tts/recover";
 import { wordTimes } from "@/lib/tts/timing";
 import { engineVoiceId, findVoice } from "@/lib/tts/voices";
-import type { EngineId, WordSpan } from "@/lib/tts/types";
+import type { EngineId, Scales, WordSpan } from "@/lib/tts/types";
 
 interface Engine {
-  synth(text: string): Promise<Synthesis>;
+  synth(text: string, scales?: Scales): Promise<Synthesis>;
 }
 
 export type WorkerRequest =
@@ -30,9 +30,12 @@ export type WorkerRequest =
   | {
       type: "synth";
       key: string;
-      text: string;
-      normStart: number;
-      words: WordSpan[];
+      // The chunk as the engine hears it, and its words in the same
+      // coordinates. The displayed text never reaches the worker: what has to
+      // be measured is the line that was actually spoken.
+      speech: string;
+      speechWords: WordSpan[];
+      scales: Scales;
     };
 
 export type WorkerResponse =
@@ -75,16 +78,15 @@ async function synth(request: Extract<WorkerRequest, { type: "synth" }>) {
   // between chunks, so the model's own variable head and tail must go. It may
   // also come back as several engine calls stitched together — see recover.ts.
   const { audio, sampleRate } = await synthesizeWithRecovery(
-    (text) => ready.synth(text),
-    request.text
+    (text) => ready.synth(text, request.scales),
+    request.speech
   );
-  const times = wordTimes(
-    request.text,
-    request.words,
-    request.normStart,
-    audio,
-    sampleRate
-  );
+  // Measured against the spoken line, including the punctuation prosody
+  // planning added: the pause weights are what place a word inside the chunk,
+  // and a comma the model observed but the weights didn't would put every word
+  // after it early. The times come back indexed by word, and the words are the
+  // same words in the same order as the ones on screen.
+  const times = wordTimes(request.speech, request.speechWords, 0, audio, sampleRate);
   const encoded = await encodeAudio(audio, sampleRate);
 
   post(

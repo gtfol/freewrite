@@ -21,6 +21,7 @@ import createPiperPhonemize from "@diffusionstudio/piper-wasm/build/piper_phonem
 import * as ort from "onnxruntime-web";
 
 import { describeThrown } from "@/lib/tts/errors";
+import type { Scales } from "@/lib/tts/types";
 
 const HF_BASE =
   "https://huggingface.co/diffusionstudio/piper-voices/resolve/main";
@@ -42,8 +43,17 @@ export interface Synthesis {
 }
 
 export interface PiperEngine {
-  synth(text: string): Promise<Synthesis>;
+  // `scales` asks for this sentence at its own rate and its own degree of
+  // variation, as multipliers on the voice's defaults. Omitted means the voice
+  // exactly as it ships.
+  synth(text: string, scales?: Scales): Promise<Synthesis>;
   release(): Promise<void>;
+}
+
+// Absolute bounds on what the model is asked for, whatever multiplier arrives.
+// Outside these VITS does not degrade gracefully — it slurs, or it buzzes.
+function clamp(value: number, low: number, high: number): number {
+  return Math.min(high, Math.max(low, value));
 }
 
 // The sidecar Piper ships next to every voice. Only the fields inference needs.
@@ -243,22 +253,25 @@ export async function createPiper(
     new Uint8Array(await model.arrayBuffer())
   );
 
-  // Fixed for the life of the session, so they're built once too.
-  const scales = [
-    config.inference.noise_scale,
-    config.inference.length_scale,
-    config.inference.noise_w,
-  ];
+  // The voice's own tuning, and the baseline every per-sentence multiplier is
+  // relative to.
+  const defaults = config.inference;
   const multiSpeaker = Object.keys(config.speaker_id_map ?? {}).length > 0;
 
   return {
-    async synth(text) {
+    async synth(text, scales) {
       const ids = await phonemize(config.espeak.voice, text);
 
       const feeds: Record<string, ort.Tensor> = {
         input: new ort.Tensor("int64", ids, [1, ids.length]),
         input_lengths: new ort.Tensor("int64", [ids.length]),
-        scales: new ort.Tensor("float32", scales),
+        // Positional and in this order — the model names the tensor, not the
+        // three numbers inside it.
+        scales: new ort.Tensor("float32", [
+          clamp(defaults.noise_scale * (scales?.noise ?? 1), 0.1, 1.5),
+          clamp(defaults.length_scale * (scales?.length ?? 1), 0.5, 2),
+          clamp(defaults.noise_w * (scales?.noiseW ?? 1), 0.1, 1.5),
+        ]),
       };
       // Single-speaker voices have no `sid` input and reject one.
       if (multiSpeaker) feeds.sid = new ort.Tensor("int64", [0]);

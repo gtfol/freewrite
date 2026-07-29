@@ -16,6 +16,17 @@ export interface Voice {
   description: string;
 }
 
+// Per-call multipliers on the voice's own VITS inference scales. See
+// lib/tts/prosody.ts for what each one buys and why they vary per sentence.
+export interface Scales {
+  // Duration multiplier: above 1 is slower.
+  length: number;
+  // Sampling noise in the flow — pitch and timbre variation.
+  noise: number;
+  // Noise in the duration predictor — how evenly phonemes are timed.
+  noiseW: number;
+}
+
 export interface WordSpan {
   // Offsets into the document-wide normalized text, so a span resolves to a
   // DOM range through the same index that anchors highlights.
@@ -32,6 +43,16 @@ export interface Chunk {
   normStart: number;
   normEnd: number;
   words: WordSpan[];
+  // The same sentence as the engine hears it: `text` plus whatever punctuation
+  // it takes to get the delivery right. Carried rather than recomputed because
+  // a manifest adopted from disk has to be able to re-synthesize a chunk
+  // without re-walking the article.
+  speech: string;
+  // `words`, in the same order, as offsets into `speech`. Word timing is
+  // measured against the spoken line and reported against the displayed one,
+  // so the two coordinate spaces both have to be on hand.
+  speechWords: WordSpan[];
+  scales: Scales;
   // Silence that follows this chunk, in milliseconds. Derived from document
   // structure, held by the scheduler rather than baked into the audio.
   gapAfter: number;
