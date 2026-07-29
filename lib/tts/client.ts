@@ -47,6 +47,22 @@ function recoverable(message: string): boolean {
   return isOutOfMemory(message) || message === WORKER_DIED;
 }
 
+// The other way synthesis fails, and it is not a memory problem despite
+// arriving in the middle of one:
+//
+//   Aborted(). Build with -sASSERTIONS for more info.
+//
+// That is the phonemizer's native code reaching C `abort()` — an uncaught
+// exception out of espeak-ng, thrown by the sentence it was handed. Its heap
+// is a fixed 16MB that cannot grow, and exhausting *that* says `Aborted(OOM)`,
+// so the bare form is about the text. Restarting the engine and feeding it the
+// same sentence produces the same abort, which is why this class is skipped
+// rather than retried.
+//
+// Consecutive failures are a different claim: that says the engine is gone,
+// not that three sentences in a row are unpronounceable.
+const MAX_CONSECUTIVE_FAILURES = 3;
+
 // A budget for the whole audiobook rather than per chunk. With the session
 // hoisted out of the per-chunk path this should never be spent; if something
 // is still leaking, two restarts is enough to prove it and stop, instead of
@@ -76,6 +92,11 @@ export class AudiobookGenerator {
   private cursor = 0;
   private wantAll = false;
   private restarts = 0;
+  // Sentences the engine wouldn't produce. Held in memory and never written to
+  // the manifest: the failure is about this engine on this run, and a reload
+  // deserves a clean attempt rather than inheriting a verdict.
+  private skipped = new Set<string>();
+  private failures = 0;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
   private book: Audiobook;
 
@@ -141,7 +162,15 @@ export class AudiobookGenerator {
   // Decoded samples for a generated chunk, or null if it isn't ready yet.
   async audio(index: number) {
     const chunk = this.book.chunks[index];
-    if (!chunk || chunk.duration === null) return null;
+    if (!chunk) return null;
+    // A skipped sentence answers with silence rather than nothing. Nothing
+    // reads as an underrun, and the reading would sit there waiting for audio
+    // that isn't coming; this way it pauses over the sentence and moves on,
+    // keeping the beat that follows it.
+    if (this.skipped.has(chunk.key)) {
+      return { audio: new Float32Array(0), sampleRate: 24000 };
+    }
+    if (chunk.duration === null) return null;
     const record = await getChunk(chunk.key);
     if (!record) return null;
     return decodeAudio(record);
@@ -269,17 +298,22 @@ export class AudiobookGenerator {
     });
   }
 
+  // Still worth generating: not done, and not given up on.
+  private pending(chunk: StoredChunk): boolean {
+    return chunk.duration === null && !this.skipped.has(chunk.key);
+  }
+
   // The chunk nearest ahead of the playhead wins; only once everything from
   // the cursor forward is done do we fill in behind it, which matters when a
   // listener seeks backwards or asks for the whole article.
   private next(): number {
     const chunks = this.book.chunks;
     for (let i = this.cursor; i < chunks.length; i++) {
-      if (chunks[i].duration === null) return i;
+      if (this.pending(chunks[i])) return i;
     }
     if (!this.wantAll) return -1;
     for (let i = 0; i < this.cursor; i++) {
-      if (chunks[i].duration === null) return i;
+      if (this.pending(chunks[i])) return i;
     }
     return -1;
   }
@@ -313,33 +347,50 @@ export class AudiobookGenerator {
           chunk.duration = cached.duration;
           chunk.bytes = cached.bytes;
           chunk.wordTimes ??= [];
+          this.failures = 0;
         } else {
           const response = await this.synthesize(chunk);
           if (this.stopped) break;
-          if (response.type === "error") {
-            this.emitState({ status: "error", message: response.message });
-            break;
-          }
-          if (response.type !== "chunk") break;
 
-          await putChunk({
-            key: response.key,
-            format: response.format,
-            data: response.data,
-            sampleRate: response.sampleRate,
-            duration: response.duration,
-            bytes: response.bytes,
-            createdAt: Date.now(),
-          });
-          chunk.duration = response.duration;
-          chunk.wordTimes = response.wordTimes;
-          chunk.bytes = response.bytes;
+          if (response.type === "chunk") {
+            await putChunk({
+              key: response.key,
+              format: response.format,
+              data: response.data,
+              sampleRate: response.sampleRate,
+              duration: response.duration,
+              bytes: response.bytes,
+              createdAt: Date.now(),
+            });
+            chunk.duration = response.duration;
+            chunk.wordTimes = response.wordTimes;
+            chunk.bytes = response.bytes;
+            this.failures = 0;
+          } else {
+            // A sentence the engine won't say is a hole in the reading. An
+            // article that stops reading at that sentence is a broken feature,
+            // and worse, the player asks for the missing chunk again the
+            // moment it reaches it, so failing here used to mean retrying the
+            // same sentence for as long as the page stayed open.
+            this.skipped.add(chunk.key);
+            this.failures++;
+            if (this.failures >= MAX_CONSECUTIVE_FAILURES) {
+              this.emitState({
+                status: "error",
+                message:
+                  response.type === "error" ? response.message : "synthesis failed",
+              });
+              break;
+            }
+          }
         }
 
         this.schedulePersist();
         this.events.onChunk?.(index);
+        // Skipped sentences count as settled, or the article would sit at
+        // "generating" forever waiting on work that will never be scheduled.
         this.emitState(
-          this.readyCount === this.book.chunks.length
+          !this.book.chunks.some((entry) => this.pending(entry))
             ? { status: "ready" }
             : {
                 status: "generating",

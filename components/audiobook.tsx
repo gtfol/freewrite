@@ -311,6 +311,11 @@ export function Audiobook({
       if (isOutOfMemory(generation.message)) {
         return "Ran out of memory for the voice — try closing other tabs.";
       }
+      // Sentences the voice won't read are skipped, so reaching here means it
+      // stopped reading several in a row.
+      if (/phonemizer|aborted\(/i.test(generation.message)) {
+        return "This voice couldn't read the article — try another voice.";
+      }
       // Voices are fetched on first use, so the common failure is the network
       // rather than anything the raw message would help with.
       return /fetch|network|load|http/i.test(generation.message)

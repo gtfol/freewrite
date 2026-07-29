@@ -203,9 +203,14 @@ async function phonemize(espeakVoice: string, text: string): Promise<number[]> {
           );
         }
       })
-      .catch((error: unknown) =>
-        fail(error instanceof Error ? error : new Error(String(error)))
-      );
+      // Emscripten reports a native abort as a bare `Aborted()`, which names
+      // neither the module nor the sentence. Naming the phonemizer is the
+      // difference between a reader seeing something actionable and seeing a
+      // build flag they can't set.
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        fail(new Error(`the phonemizer failed: ${message}`));
+      });
   });
 }
 
