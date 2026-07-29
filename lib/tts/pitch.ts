@@ -16,53 +16,61 @@
 // guess. So the rise is put on the waveform afterwards, where it is exactly as
 // large as it was asked to be.
 //
-// Pitch moves without anything else moving by resampling and then undoing the
-// duration change: reading the segment with a read pointer that accelerates
-// raises every frequency in it and shortens it, and WSOLA — already here for
-// playback speed, see lib/tts/stretch.ts — puts the duration back without
-// touching pitch. The acceleration ramps rather than steps, because what a
-// listener hears as "more is coming" is the movement, not the height.
+// Pitch moves by resampling: reading the segment with a read pointer that
+// accelerates raises every frequency in it. The acceleration ramps rather than
+// steps, because what a listener hears as "more is coming" is the movement,
+// not the height.
 //
-// It only ever runs on voiced audio, and that restriction is load bearing
-// rather than tidy. WSOLA hides its splices by landing them on pitch-period
-// boundaries; noise has no periods, so on a fricative the similarity search
-// picks an arbitrary offset and overlap-adds noise onto itself, which comes
-// out as a short metallic buzz. Choosing the segment by loudness put /s/ and
-// /t/ inside it — a fricative is among the loudest things in a sentence — and
-// produced exactly that, rarely, on whichever items happened to end unvoiced.
-// Periodicity is the test that tells them apart, and it agrees with the
-// linguistics: the tone of "toast" is carried by the diphthong, and the /st/
-// after it has no pitch to move in the first place.
+// Resampling also compresses the segment, and the time it gives up is taken
+// back out of the silence after the item rather than put back into the audio.
+// That is the whole reason there is no time-stretching here any more. WSOLA
+// restored the duration and preserved the formants, but it hides its splices
+// by landing them on pitch-period boundaries, and on a segment whose period is
+// changing under it — which is exactly what a pitch ramp is — it cannot. The
+// cost was measured on a synthetic ramp against an analytically perfect one:
+// 0.08 semitones of wobble above the noise floor at 90Hz, an eighth of an
+// order of magnitude worse for every low voice, and no amount of tuning moved
+// it. It scaled with neither the depth of the rise nor the search range; it
+// was intrinsic. Resampling instead comes in at the measurement floor.
+//
+// What that trades away is formants: resampling carries them up with the
+// pitch, so the last syllable of an item is brighter by up to the same 19%
+// the tone moves. Over a ramp that reaches its peak only at the very end of a
+// syllable, brighter is what a real speaker does too — where a splice artifact
+// is not.
+//
+// It only ever runs on voiced audio, which the linguistics wants anyway: the
+// tone of "toast" is carried by the diphthong, and the /st/ after it has no
+// pitch to move. Choosing that stretch by loudness rather than by periodicity
+// put /s/ and /t/ inside it and was the source of an earlier, much louder
+// artifact.
 //
 // Relative imports with extensions, so this runs under `npm test` without a
 // bundler. See pitch.test.ts.
-
-import { timeStretch } from "./stretch.ts";
 
 // How far the tone travels. Three semitones is the middle of the range a
 // speaker uses for this; past about five it stops reading as a list and starts
 // reading as a question.
 export const RISE_SEMITONES = 3;
 
-// A movement shorter than this is not heard as a movement, and is also too
-// short for WSOLA to have anything to splice.
+// A movement shorter than this is not heard as a movement.
 const MIN_RISE_SECONDS = 0.09;
-// The rise belongs to the item's last syllable or so. Given more than this it
-// starts lifting the whole item, which sounds like excitement rather than
-// continuation.
-const MAX_RISE_SECONDS = 0.3;
-
-// Crossfade where the lifted segment meets the audio around it.
+// The rise belongs to the item's last syllable, and a syllable pre-pausal is
+// about this long.
 //
-// Asymmetric, because the two edges are not the same problem. At the head the
-// ramp is still at rate 1 and WSOLA's first window is unmoved, so the lifted
-// audio and the original are the same samples and a long fade blends identical
-// content. At the tail they have drifted out of phase, and fading between two
-// phase-shifted copies of a periodic signal is comb filtering — audible as a
-// hollowness that gets worse the longer it runs. So: fade in gently, cut away
-// quickly.
-const HEAD_SECONDS = 0.006;
-const TAIL_SECONDS = 0.002;
+// It was 300ms, which is two or three syllables of running speech. Word times
+// are interpolated rather than measured, so a span that long also had room to
+// reach back past the word it belongs to and start climbing under the one
+// before — "biting at its tail," is voiced almost end to end, and lifting the
+// last third of it reads as the whole phrase swaying rather than as one item
+// handing over to the next.
+const MAX_RISE_SECONDS = 0.18;
+
+// How much silence the pause has to be able to spare before a rise is allowed,
+// relative to the loudness of the syllable being lifted.
+const PAD_LEVEL_RATIO = 0.08;
+// The seam where the lifted audio meets audio that never moved.
+const SEAM_SECONDS = 0.003;
 
 // Voicing detection. The window has to hold two periods of a low voice (85Hz
 // is ~12ms each) for autocorrelation to find one.
@@ -267,19 +275,34 @@ function voicedRun(
   };
 }
 
-// One segment, lifted, at exactly the length it arrived.
-function raise(
-  segment: Float32Array,
-  sampleRate: number,
-  semitones: number
-): Float32Array | null {
+// Catmull-Rom. Linear interpolation between samples is a low-pass whose corner
+// moves with the fractional offset, so on a ramp it breathes; cubic costs three
+// more multiplies and doesn't.
+function sampleAt(segment: Float32Array, phase: number): number {
+  const i = Math.floor(phase);
+  const t = phase - i;
+  const p0 = segment[Math.max(0, i - 1)];
+  const p1 = segment[i];
+  const p2 = segment[Math.min(segment.length - 1, i + 1)];
+  const p3 = segment[Math.min(segment.length - 1, i + 2)];
+
+  return (
+    0.5 *
+    (2 * p1 +
+      (p2 - p0) * t +
+      (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t +
+      (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t)
+  );
+}
+
+// One segment, lifted. Comes back shorter than it went in — reading a segment
+// with an accelerating pointer raises every frequency in it and compresses it
+// by the same factor, and nothing here puts that back.
+function raise(segment: Float32Array, semitones: number): Float32Array {
   const n = segment.length;
   const top = Math.pow(2, semitones / 12);
 
-  // Read faster and faster. The result is pitched up by the read rate and
-  // shorter by it, and never longer than the input since the rate never drops
-  // below 1.
-  const warped = new Float32Array(n);
+  const out = new Float32Array(n);
   let phase = 0;
   let count = 0;
   while (phase < n - 1 && count < n) {
@@ -287,31 +310,66 @@ function raise(
     // the sentence was already at, so there is no step where the rise begins.
     const p = phase / (n - 1);
     const rate = 1 + (top - 1) * 0.5 * (1 - Math.cos(Math.PI * p));
-    const i = Math.floor(phase);
-    warped[count++] = segment[i] + (segment[i + 1] - segment[i]) * (phase - i);
+    out[count++] = sampleAt(segment, phase);
     phase += rate;
   }
-  if (count < 2) return null;
-
-  const restored = timeStretch(warped.subarray(0, count), sampleRate, count / n);
-  // Anything but the exact length back would have to be padded or spliced, and
-  // both are audible where no rise at all is not. WSOLA returns the length it
-  // was asked for, so this is a guard rather than a case.
-  return restored.length === n ? restored : null;
+  return out.subarray(0, count);
 }
 
-function blend(
-  out: Float32Array,
-  raised: Float32Array,
+// The quietest stretch of `length` samples in the range, or -1 if even the
+// quietest is not quiet. Where the time the rise gave up is handed back.
+function quietest(
+  audio: Float32Array,
   from: number,
-  sampleRate: number
-): void {
-  const head = Math.max(1, Math.round(sampleRate * HEAD_SECONDS));
-  const tail = Math.max(1, Math.round(sampleRate * TAIL_SECONDS));
-  const n = raised.length;
-  for (let i = 0; i < n; i++) {
-    const weight = Math.min(1, i / head, (n - 1 - i) / tail);
-    out[from + i] = out[from + i] * (1 - weight) + raised[i] * weight;
+  to: number,
+  length: number,
+  floor: number
+): number {
+  if (to - from < length || length <= 0) return -1;
+
+  // Running sum of squares, so the whole scan is one pass.
+  let energy = 0;
+  for (let i = from; i < from + length; i++) energy += audio[i] * audio[i];
+
+  let best = from;
+  let least = energy;
+  for (let at = from + 1; at + length <= to; at++) {
+    energy += audio[at + length - 1] * audio[at + length - 1];
+    energy -= audio[at - 1] * audio[at - 1];
+    // A running sum walked from a loud window down to a silent one lands a
+    // hair below zero, and the square root of that is NaN — which compares
+    // false against every threshold and rejects a pause that is perfectly
+    // silent.
+    if (energy < 0) energy = 0;
+    if (energy < least) {
+      least = energy;
+      best = at;
+    }
+  }
+  return Math.sqrt(least / length) <= floor ? best : -1;
+}
+
+function level(audio: Float32Array, from: number, to: number): number {
+  let energy = 0;
+  for (let i = from; i < to; i++) energy += audio[i] * audio[i];
+  return Math.sqrt(energy / Math.max(1, to - from));
+}
+
+// Smooths a step in place by fading across it, so a seam is heard as nothing
+// rather than as a click.
+function feather(out: Float32Array, at: number, sampleRate: number): void {
+  const half = Math.max(1, Math.round(sampleRate * SEAM_SECONDS));
+  const from = Math.max(0, at - half);
+  const to = Math.min(out.length, at + half);
+  if (to - from < 3) return;
+
+  const before = out[from];
+  const after = out[to - 1];
+  for (let i = from; i < to; i++) {
+    const t = (i - from) / (to - from - 1);
+    // Only the discontinuity is removed; the waveform underneath is untouched.
+    const step = before * (1 - t) + after * t;
+    out[i] = out[i] * 0.5 + step * 0.5;
   }
 }
 
@@ -343,13 +401,39 @@ export function applyRises(
       run.start,
       run.end - Math.round(MAX_RISE_SECONDS * sampleRate)
     );
-    // A voiced run too short to move the tone through is left alone. Missing
-    // the rise on one item of a list is a reading; a fifty-millisecond burst
-    // of something else is not.
+    // A voiced run too short to move a tone through is left alone. Missing the
+    // rise on one item of a list is a reading; anything audible in its place
+    // is not.
     if (run.end - opens < shortest) continue;
 
-    const raised = raise(out.subarray(opens, run.end), sampleRate, semitones);
-    if (raised) blend(out, raised, opens, sampleRate);
+    const raised = raise(out.subarray(opens, run.end), semitones);
+    const deficit = run.end - opens - raised.length;
+    if (deficit <= 0) continue;
+
+    // The time the rise gave up comes out of the silence after the item, so
+    // everything from `limit` on stays exactly where the word times say it is.
+    // If there is no silence to take it from — an item running straight into
+    // the next with no pause at all — there is nowhere to put the deficit and
+    // the rise is dropped.
+    const peak = level(out, opens, run.end);
+    const padAt = quietest(out, run.end, limit, deficit, peak * PAD_LEVEL_RATIO);
+    if (padAt === -1) continue;
+
+    const before = out.slice(run.end, padAt);
+    const after = out.slice(padAt, limit);
+    let at = opens;
+    out.set(raised, at);
+    at += raised.length;
+    out.set(before, at);
+    at += before.length;
+    out.fill(0, at, at + deficit);
+    at += deficit;
+    out.set(after, at);
+
+    // The lifted audio ends mid-period against audio that never moved. It is
+    // landing on a consonant or a pause rather than on more vowel, so there is
+    // little to hear, but the step itself still wants smoothing.
+    feather(out, opens + raised.length, sampleRate);
   }
   return out;
 }

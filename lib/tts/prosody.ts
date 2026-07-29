@@ -78,7 +78,11 @@ const TERMINATED = /[.!?…:;,—–][\s"'”’)\]]*$/;
 //    so the tone stepped back down over the last of the vowel. Inaudible in
 //    "eyes", plain in "gas". The run's end is now walked to the boundary at
 //    millisecond resolution.
-export const RISE_REVISION = 4;
+// 5: the time-stretch that restored the syllable's duration wobbled the tone,
+//    worst on low voices — WSOLA splices on pitch periods and a ramp has no
+//    steady one. The duration now comes out of the pause instead, and the ramp
+//    is a syllable rather than three.
+export const RISE_REVISION = 5;
 
 // A coordinated series needs at least this many items before the rise is worth
 // having. Two items joined by "and" usually carry no comma at all.

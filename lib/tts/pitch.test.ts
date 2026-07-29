@@ -7,7 +7,7 @@ const RATE = 24000;
 
 // A voiced sound: a fundamental with a couple of harmonics on it, which is
 // enough structure for autocorrelation to find a period the way it would in
-// speech, and enough for WSOLA to have something to match against.
+// speech.
 function voiced(f0: number, seconds: number, sampleRate = RATE): Float32Array {
   const audio = new Float32Array(Math.round(seconds * sampleRate));
   for (let i = 0; i < audio.length; i++) {
@@ -21,7 +21,7 @@ function voiced(f0: number, seconds: number, sampleRate = RATE): Float32Array {
 }
 
 // Deterministic noise, standing in for a fricative: loud, and with no period
-// for WSOLA to splice on. This is the content that has to be left alone.
+// in it. This is the content that has to be left alone.
 function fricative(seconds: number, sampleRate = RATE): Float32Array {
   const audio = new Float32Array(Math.round(seconds * sampleRate));
   let seed = 0x2f6e2b1;
@@ -45,6 +45,12 @@ function voicedFricative(
   const audio = new Float32Array(tone.length);
   for (let i = 0; i < audio.length; i++) audio[i] = tone[i] * 0.5 + hiss[i] * 0.7;
   return audio;
+}
+
+// The comma's pause. Every rise borrows the few milliseconds resampling costs
+// from one of these, so no fixture is realistic without it.
+function pause(seconds: number, sampleRate = RATE): Float32Array {
+  return new Float32Array(Math.round(seconds * sampleRate));
 }
 
 function concat(...parts: Float32Array[]): Float32Array {
@@ -95,6 +101,30 @@ function pitchAt(
 const semitonesBetween = (low: number, high: number) =>
   12 * Math.log2(high / low);
 
+// Where a stretch of the original turns up in the output. Raising the pitch
+// shortens the syllable and the time comes back out of the pause, so whatever
+// sits between the two is moved earlier — moved, and not otherwise touched,
+// which is the property worth asserting about a consonant.
+function relocated(
+  output: Float32Array,
+  part: Float32Array,
+  near: number,
+  slack: number
+): number {
+  const matches = (at: number) => {
+    if (at < 0 || at + part.length > output.length) return false;
+    for (let i = 0; i < part.length; i++) {
+      if (output[at + i] !== part[i]) return false;
+    }
+    return true;
+  };
+  for (let away = 0; away <= slack; away++) {
+    if (matches(near - away)) return near - away;
+    if (matches(near + away)) return near + away;
+  }
+  return -1;
+}
+
 test("returns the audio untouched when there is nothing to lift", () => {
   const audio = voiced(120, 0.4);
   assert.equal(applyRises(audio, RATE, []), audio);
@@ -107,11 +137,11 @@ test("leaves the length alone, so word times still describe the audio", () => {
 });
 
 test("lifts the end of the span and not the start", () => {
-  const audio = voiced(120, 0.5);
-  const raised = applyRises(audio, RATE, [{ from: 0.2, to: 0.5 }]);
+  const audio = concat(voiced(120, 0.5), pause(0.1));
+  const raised = applyRises(audio, RATE, [{ from: 0.2, to: 0.6 }]);
 
-  const opens = pitchAt(raised, Math.round(0.2 * RATE), Math.round(0.26 * RATE));
-  const closes = pitchAt(raised, Math.round(0.44 * RATE), Math.round(0.5 * RATE));
+  const opens = pitchAt(raised, Math.round(0.33 * RATE), Math.round(0.38 * RATE));
+  const closes = pitchAt(raised, Math.round(0.44 * RATE), Math.round(0.49 * RATE));
 
   assert.ok(
     Math.abs(semitonesBetween(120, opens)) < 0.5,
@@ -124,10 +154,10 @@ test("lifts the end of the span and not the start", () => {
 });
 
 test("moves the tone monotonically through the span", () => {
-  const audio = voiced(120, 0.5);
-  const raised = applyRises(audio, RATE, [{ from: 0.2, to: 0.5 }]);
+  const audio = concat(voiced(120, 0.5), pause(0.1));
+  const raised = applyRises(audio, RATE, [{ from: 0.2, to: 0.6 }]);
 
-  const readings = [0.21, 0.29, 0.37, 0.44].map((at) =>
+  const readings = [0.34, 0.38, 0.42, 0.45].map((at) =>
     pitchAt(raised, Math.round(at * RATE), Math.round((at + 0.055) * RATE))
   );
   for (let i = 1; i < readings.length; i++) {
@@ -139,33 +169,34 @@ test("moves the tone monotonically through the span", () => {
 });
 
 test("asks for more tone when told to", () => {
-  const audio = voiced(120, 0.5);
+  const audio = concat(voiced(120, 0.5), pause(0.1));
   const window = (raised: Float32Array) =>
-    pitchAt(raised, Math.round(0.44 * RATE), Math.round(0.5 * RATE));
+    pitchAt(raised, Math.round(0.43 * RATE), Math.round(0.48 * RATE));
 
-  const small = window(applyRises(audio, RATE, [{ from: 0.2, to: 0.5 }], 2));
-  const large = window(applyRises(audio, RATE, [{ from: 0.2, to: 0.5 }], 5));
+  const small = window(applyRises(audio, RATE, [{ from: 0.2, to: 0.6 }], 2));
+  const large = window(applyRises(audio, RATE, [{ from: 0.2, to: 0.6 }], 5));
   assert.ok(large > small + 5, `${small.toFixed(1)}Hz vs ${large.toFixed(1)}Hz`);
 });
 
 test("leaves everything outside the span exactly as it was", () => {
-  const audio = voiced(120, 0.6);
-  const raised = applyRises(audio, RATE, [{ from: 0.3, to: 0.6 }]);
-  // The span is capped at its last 300ms, so nothing before 0.3s may move.
+  const audio = concat(voiced(120, 0.6), pause(0.1));
+  const raised = applyRises(audio, RATE, [{ from: 0.3, to: 0.7 }]);
+  // Nothing before the span may move, whatever happens inside it.
   for (let i = 0; i < Math.round(0.3 * RATE); i++) {
     assert.equal(raised[i], audio[i], `sample ${i} moved`);
   }
 });
 
 test("lifts each item of a list independently", () => {
-  const audio = voiced(120, 0.9);
+  const item = concat(voiced(120, 0.22), pause(0.08));
+  const audio = concat(item, item, item);
   const raised = applyRises(audio, RATE, [
     { from: 0.0, to: 0.3 },
     { from: 0.3, to: 0.6 },
     { from: 0.6, to: 0.9 },
   ]);
 
-  for (const at of [0.24, 0.54, 0.84]) {
+  for (const at of [0.16, 0.46, 0.76]) {
     const top = pitchAt(raised, Math.round(at * RATE), Math.round((at + 0.055) * RATE));
     assert.ok(
       Math.abs(semitonesBetween(120, top) - RISE_SEMITONES) < 0.8,
@@ -173,7 +204,7 @@ test("lifts each item of a list independently", () => {
     );
   }
   // And each one comes back down for the next, rather than stacking.
-  const restart = pitchAt(raised, Math.round(0.31 * RATE), Math.round(0.365 * RATE));
+  const restart = pitchAt(raised, Math.round(0.30 * RATE), Math.round(0.355 * RATE));
   assert.ok(
     Math.abs(semitonesBetween(120, restart)) < 0.8,
     `the next item should start where the voice was, got ${restart.toFixed(1)}Hz`
@@ -200,21 +231,21 @@ test("declines a span that is all pause", () => {
 test("never touches the fricative an item ends on", () => {
   const voice = voiced(120, 0.3);
   const hiss = fricative(0.12);
-  const audio = concat(voice, hiss);
+  const audio = concat(voice, hiss, pause(0.1));
 
-  const raised = applyRises(audio, RATE, [{ from: 0, to: 0.42 }]);
+  const raised = applyRises(audio, RATE, [{ from: 0, to: 0.52 }]);
 
-  for (let i = voice.length; i < audio.length; i++) {
-    assert.equal(raised[i], audio[i], `sample ${i} of the fricative moved`);
-  }
+  const at = relocated(raised, hiss, voice.length, Math.round(0.05 * RATE));
+  assert.notEqual(at, -1, "the fricative came back altered rather than moved");
+  assert.ok(at < voice.length, "the fricative should move earlier, not later");
 });
 
 test("still lifts the vowel before that fricative", () => {
   const voice = voiced(120, 0.3);
-  const audio = concat(voice, fricative(0.12));
-  const raised = applyRises(audio, RATE, [{ from: 0, to: 0.42 }]);
+  const audio = concat(voice, fricative(0.12), pause(0.1));
+  const raised = applyRises(audio, RATE, [{ from: 0, to: 0.52 }]);
 
-  const top = pitchAt(raised, Math.round(0.235 * RATE), Math.round(0.29 * RATE));
+  const top = pitchAt(raised, Math.round(0.22 * RATE), Math.round(0.27 * RATE));
   assert.ok(
     Math.abs(semitonesBetween(120, top) - RISE_SEMITONES) < 0.8,
     `expected the rise on the vowel, got ${semitonesBetween(120, top).toFixed(2)} semitones`
@@ -227,19 +258,20 @@ test("still lifts the vowel before that fricative", () => {
 test("never touches a voiced fricative either", () => {
   const vowel = voiced(120, 0.28);
   const buzz = voicedFricative(120, 0.12);
-  const audio = concat(vowel, buzz);
+  const audio = concat(vowel, buzz, pause(0.1));
 
-  const raised = applyRises(audio, RATE, [{ from: 0, to: 0.4 }]);
-  for (let i = vowel.length; i < audio.length; i++) {
-    assert.equal(raised[i], audio[i], `sample ${i} of the voiced fricative moved`);
-  }
+  const raised = applyRises(audio, RATE, [{ from: 0, to: 0.5 }]);
+
+  const at = relocated(raised, buzz, vowel.length, Math.round(0.05 * RATE));
+  assert.notEqual(at, -1, "the voiced fricative came back altered rather than moved");
+  assert.ok(at < vowel.length, "it should move earlier, not later");
 });
 
 test("still lifts the diphthong before a voiced fricative", () => {
-  const audio = concat(voiced(120, 0.28), voicedFricative(120, 0.12));
-  const raised = applyRises(audio, RATE, [{ from: 0, to: 0.4 }]);
+  const audio = concat(voiced(120, 0.28), voicedFricative(120, 0.12), pause(0.1));
+  const raised = applyRises(audio, RATE, [{ from: 0, to: 0.5 }]);
 
-  const top = pitchAt(raised, Math.round(0.215 * RATE), Math.round(0.27 * RATE));
+  const top = pitchAt(raised, Math.round(0.21 * RATE), Math.round(0.265 * RATE));
   assert.ok(
     Math.abs(semitonesBetween(120, top) - RISE_SEMITONES) < 0.9,
     `expected the rise on the vowel, got ${semitonesBetween(120, top).toFixed(2)} semitones`
@@ -253,18 +285,26 @@ test("still lifts the diphthong before a voiced fricative", () => {
 test("leaves no un-raised vowel between the rise and the consonant", () => {
   for (const ms of [100, 140, 200, 260]) {
     const vowel = voiced(120, ms / 1000);
-    const audio = concat(vowel, fricative(0.12));
-    const raised = applyRises(audio, RATE, [{ from: 0, to: (ms + 120) / 1000 }]);
+    const hiss = fricative(0.12);
+    const audio = concat(vowel, hiss, pause(0.1));
+    const raised = applyRises(audio, RATE, [{ from: 0, to: (ms + 220) / 1000 }]);
 
-    let last = -1;
-    for (let i = 0; i < audio.length; i++) if (raised[i] !== audio[i]) last = i;
-    assert.notEqual(last, -1, `no rise applied to a ${ms}ms vowel`);
+    const at = relocated(raised, hiss, vowel.length, Math.round(0.05 * RATE));
+    assert.notEqual(at, -1, `no rise applied to a ${ms}ms vowel`);
 
-    // Under half a period at 120Hz, so there is no pitch to step back down to.
-    const leftover = ((vowel.length - 1 - last) / RATE) * 1000;
+    // Whatever sits between the lifted audio and the consonant is vowel that
+    // did not get lifted. Under half a period at 120Hz there is no pitch left
+    // in it to step back down to.
+    let leftover = 0;
+    while (
+      leftover < at &&
+      raised[at - 1 - leftover] === audio[vowel.length - 1 - leftover]
+    ) {
+      leftover++;
+    }
     assert.ok(
-      leftover >= 0 && leftover < 4,
-      `${leftover.toFixed(1)}ms of un-raised vowel after a ${ms}ms vowel`
+      (leftover / RATE) * 1000 < 4,
+      `${((leftover / RATE) * 1000).toFixed(1)}ms of un-raised vowel after a ${ms}ms vowel`
     );
   }
 });
@@ -275,13 +315,22 @@ test("declines an item that is all fricative", () => {
   assert.deepEqual(Array.from(raised), Array.from(audio));
 });
 
+// Resampling to raise the pitch also shortens the segment, and that time comes
+// out of the pause rather than being stretched back in. With no pause there is
+// nowhere for it to go.
+test("declines an item with no pause to borrow the time from", () => {
+  const audio = concat(voiced(120, 0.3), fricative(0.25));
+  const raised = applyRises(audio, RATE, [{ from: 0, to: 0.55 }]);
+  assert.deepEqual(Array.from(raised), Array.from(audio));
+});
+
 test("takes the last voiced run, not the first", () => {
   // A stop in the middle of a word: "bacon" is [beɪ] k [ən].
   const audio = concat(
     voiced(120, 0.14),
     fricative(0.05),
     voiced(120, 0.16),
-    new Float32Array(Math.round(0.08 * RATE))
+    pause(0.08)
   );
   const raised = applyRises(audio, RATE, [{ from: 0, to: 0.43 }]);
 
@@ -292,7 +341,7 @@ test("takes the last voiced run, not the first", () => {
     `the earlier syllable moved to ${early.toFixed(1)}Hz`
   );
   // The last one carries the tone.
-  const late = pitchAt(raised, Math.round(0.29 * RATE), Math.round(0.345 * RATE));
+  const late = pitchAt(raised, Math.round(0.28 * RATE), Math.round(0.335 * RATE));
   assert.ok(
     Math.abs(semitonesBetween(120, late) - RISE_SEMITONES) < 0.9,
     `expected the rise on the final syllable, got ${semitonesBetween(120, late).toFixed(2)} semitones`
