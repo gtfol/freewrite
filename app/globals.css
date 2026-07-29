@@ -112,6 +112,11 @@
   html,
   body {
     height: 100%;
+    /* Pull-to-refresh turns a tap that drifted a few pixels into a full page
+       reload — expensive anywhere, and mid-listen it costs the reading
+       position and the loaded voice with it. Nothing here scrolls inside a
+       parent, so there is no scroll chaining to give up in exchange. */
+    overscroll-behavior-y: none;
   }
   body {
     @apply bg-background text-foreground;
@@ -287,6 +292,10 @@
    exists to seek, so ordinary reading keeps its text cursor. */
 [data-tts-seekable] {
   cursor: pointer;
+  /* On a phone a seek is a tap, and two sentences seeked in a row are a
+     double-tap — which the browser would answer by zooming the article rather
+     than moving the voice. Panning and pinching are untouched. */
+  touch-action: manipulation;
 }
 
 /* Embedded media in the side-by-side preview. Everything renders as a modest

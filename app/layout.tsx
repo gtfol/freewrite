@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import {
   Crimson_Pro,
   EB_Garamond,
@@ -8,6 +8,7 @@ import {
 } from "next/font/google";
 
 import { ThemeProvider } from "@/components/theme-provider";
+import { ViewportLock } from "@/components/viewport-lock";
 import "./globals.css";
 
 const lato = Lato({
@@ -40,6 +41,15 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
+// Scale 1, so a stray double-tap or a rotation can't leave the reader zoomed
+// into the middle of a paragraph. ViewportLock lifts this for a real pinch and
+// restores it afterwards — the cap is against accidents, not against zooming.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -55,6 +65,7 @@ export default function RootLayout({
           defaultTheme="light"
           disableTransitionOnChange
         >
+          <ViewportLock />
           {children}
         </ThemeProvider>
       </body>

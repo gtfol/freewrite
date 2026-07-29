@@ -43,8 +43,11 @@ const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
 // repaints imperatively rather than through React.
 const UI_THROTTLE_MS = 250;
 
+// The transport is one row and stays one row: on a phone there is no width to
+// spare, and a control that wrapped to a second line would push the article up
+// under the reader's thumb.
 const itemClass =
-  "text-muted-foreground transition-colors hover:text-foreground";
+  "shrink-0 whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground";
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -91,8 +94,24 @@ function seekTargetAt(
 
 // Text the seek layer should keep its hands off: these have their own click
 // behaviour, and previewing a jump under the cursor there would be a lie.
-function inert(target: EventTarget | null): boolean {
-  return !!(target as HTMLElement | null)?.closest("a, [data-hl-chip], button");
+//
+// Links are the exception on touch. A fingertip covers several words, so a
+// link caught under a tap meant for the sentence around it would leave the
+// article — opening the source in a new tab, which reads as the reader having
+// navigated away from itself. While there is a transport to seek, the article
+// is a seek surface first and links go back to being text.
+function inert(target: EventTarget | null, linksSeek: boolean): boolean {
+  const element = target as HTMLElement | null;
+  if (element?.closest("[data-hl-chip], button")) return true;
+  return !linksSeek && !!element?.closest("a");
+}
+
+// Touch has no hover and no precision; both are what the link exception turns
+// on. Read per event rather than once — a tablet can gain a mouse.
+function coarsePointer(): boolean {
+  return (
+    typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches
+  );
 }
 
 // A stored choice only counts if it still exists — voices removed from the
@@ -302,7 +321,7 @@ export function Audiobook({
       if (!player || !index) return;
       if (player.getState() === "idle") return;
 
-      if (inert(event.target)) return;
+      if (inert(event.target, coarsePointer())) return;
       if (!window.getSelection()?.isCollapsed) return;
 
       // Lands on the clicked word when its timing is known, so clicking deep
@@ -313,7 +332,12 @@ export function Audiobook({
         event.clientX,
         event.clientY
       );
-      if (target) player.seekToChunk(target.chunkIndex, target.time);
+      if (!target) return;
+      // The seek is the whole answer to this click. Said out loud because a
+      // link may be underneath it, and following it is what this handler just
+      // decided not to do.
+      event.preventDefault();
+      player.seekToChunk(target.chunkIndex, target.time);
     };
 
     root.addEventListener("click", onClick);
@@ -375,7 +399,10 @@ export function Audiobook({
     const onMove = (event: MouseEvent) => {
       // Mid-drag the reader is selecting text to annotate, not aiming at a
       // word; the click declines to seek there and the preview follows it.
-      if (inert(event.target) || !window.getSelection()?.isCollapsed) {
+      if (
+        inert(event.target, coarsePointer()) ||
+        !window.getSelection()?.isCollapsed
+      ) {
         point = null;
       } else {
         point = { x: event.clientX, y: event.clientY };
@@ -454,35 +481,55 @@ export function Audiobook({
   const voice = voiceId ? findVoice(voiceId) : undefined;
   const progress = display.total > 0 ? display.time / display.total : 0;
 
-  const status = (() => {
+  // Two lengths of the same line. The status shares one row with five
+  // controls, and on a phone the full sentence is cut off exactly where the
+  // number lives — the half worth reading, since it's the half that moves. So
+  // narrow screens get the number and drop the words around it.
+  const status = ((): { full: string; short: string } | null => {
     if (generation.status === "error") {
       // Restarting the engine is already tried before this is ever shown, so
       // by here it's a real dead end and the message has to say what to do.
       if (isOutOfMemory(generation.message)) {
-        return "Ran out of memory for the voice — try closing other tabs.";
+        return {
+          full: "Ran out of memory for the voice — try closing other tabs.",
+          short: "Out of memory",
+        };
       }
       // Sentences the voice won't read are skipped, so reaching here means it
       // stopped reading several in a row.
       if (/phonemizer|aborted\(/i.test(generation.message)) {
-        return "This voice couldn't read the article — try another voice.";
+        return {
+          full: "This voice couldn't read the article — try another voice.",
+          short: "Voice failed",
+        };
       }
       // Voices are fetched on first use, so the common failure is the network
       // rather than anything the raw message would help with.
       if (/fetch|network|load|http/i.test(generation.message)) {
-        return "Couldn't download the voice — check your connection.";
+        return {
+          full: "Couldn't download the voice — check your connection.",
+          short: "No connection",
+        };
       }
       // Everything past here is the engine talking to itself. It once put a
       // wasm exception pointer in this line, rendered as a bare `4190029960`
       // where the reader expected to be told something. Whatever it says goes
       // to the console; the line gets a sentence.
-      return "Something went wrong generating the audio.";
+      return {
+        full: "Something went wrong generating the audio.",
+        short: "Failed",
+      };
     }
     if (generation.status === "loading-model") {
-      return `Downloading voice… ${Math.round(generation.progress * 100)}%`;
+      const percent = `${Math.round(generation.progress * 100)}%`;
+      return { full: `Downloading voice… ${percent}`, short: percent };
     }
-    if (playerState === "buffering") return "Buffering…";
+    if (playerState === "buffering") {
+      return { full: "Buffering…", short: "Buffering…" };
+    }
     if (generation.status === "generating") {
-      return `Generating ${generation.done}/${generation.total}`;
+      const count = `${generation.done}/${generation.total}`;
+      return { full: `Generating ${count}`, short: count };
     }
     return null;
   })();
@@ -500,12 +547,12 @@ export function Audiobook({
           />
         </div>
 
-        <div className="flex items-center gap-3 text-[13px]">
+        <div className="flex items-center gap-2 text-[13px] sm:gap-3">
           <button
             type="button"
             onClick={toggle}
             aria-label={playing ? "Pause" : "Play"}
-            className="flex items-center text-foreground transition-opacity hover:opacity-70"
+            className="flex shrink-0 items-center text-foreground transition-opacity hover:opacity-70"
           >
             {playerState === "buffering" ? (
               <Loader2 className="size-4 animate-spin" />
@@ -516,7 +563,9 @@ export function Audiobook({
             )}
           </button>
 
-          <span className="tabular-nums text-muted-foreground">
+          {/* Elapsed and total are one reading, and half of it is useless:
+              this never wraps and never shortens, whatever else has to give. */}
+          <span className="shrink-0 whitespace-nowrap tabular-nums text-muted-foreground">
             {formatTime(display.time)} / {formatTime(display.total)}
           </span>
 
@@ -569,8 +618,9 @@ export function Audiobook({
           </button>
 
           {status && (
-            <span className="ml-auto truncate text-xs text-muted-foreground">
-              {status}
+            <span className="ml-auto min-w-0 truncate text-xs text-muted-foreground">
+              <span className="sm:hidden">{status.short}</span>
+              <span className="hidden sm:inline">{status.full}</span>
             </span>
           )}
         </div>
