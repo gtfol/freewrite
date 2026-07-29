@@ -14,6 +14,7 @@
 // the main thread gets a finished chunk and never sees a raw waveform.
 
 import { encodeAudio } from "@/lib/tts/codec";
+import { describeThrown } from "@/lib/tts/errors";
 import { createPiper, type Synthesis } from "@/lib/tts/piper";
 import { synthesizeWithRecovery } from "@/lib/tts/recover";
 import { wordTimes } from "@/lib/tts/timing";
@@ -105,10 +106,13 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
   const run = request.type === "init" ? init(request.voiceId) : synth(request);
   void run.catch((error: unknown) => {
+    // Logged before it is described, because describing it is lossy and this
+    // is the last place the thrown value exists.
+    console.error("[tts] synthesis failed", error);
     post({
       type: "error",
       key: request.type === "synth" ? request.key : undefined,
-      message: error instanceof Error ? error.message : String(error),
+      message: describeThrown(error),
     });
   });
 };

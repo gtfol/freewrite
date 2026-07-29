@@ -93,6 +93,15 @@ export function Audiobook({
     void requestPersistence();
   }, []);
 
+  // The status line is for the reader, so the engine's own account of a
+  // failure has to land somewhere it can still be read. Here rather than in
+  // the status expression, which runs on every render.
+  useEffect(() => {
+    if (generation.status === "error") {
+      console.error("[tts] generation failed:", generation.message);
+    }
+  }, [generation]);
+
   const paint = useCallback(
     (chunkIndex: number, wordIndex: number) => {
       const index = indexRef.current;
@@ -319,9 +328,14 @@ export function Audiobook({
       }
       // Voices are fetched on first use, so the common failure is the network
       // rather than anything the raw message would help with.
-      return /fetch|network|load|http/i.test(generation.message)
-        ? "Couldn't download the voice — check your connection."
-        : generation.message;
+      if (/fetch|network|load|http/i.test(generation.message)) {
+        return "Couldn't download the voice — check your connection.";
+      }
+      // Everything past here is the engine talking to itself. It once put a
+      // wasm exception pointer in this line, rendered as a bare `4190029960`
+      // where the reader expected to be told something. Whatever it says goes
+      // to the console; the line gets a sentence.
+      return "Something went wrong generating the audio.";
     }
     if (generation.status === "loading-model") {
       return `Downloading voice… ${Math.round(generation.progress * 100)}%`;

@@ -20,6 +20,8 @@
 import createPiperPhonemize from "@diffusionstudio/piper-wasm/build/piper_phonemize.js";
 import * as ort from "onnxruntime-web";
 
+import { describeThrown } from "@/lib/tts/errors";
+
 const HF_BASE =
   "https://huggingface.co/diffusionstudio/piper-voices/resolve/main";
 // vits-web's OPFS directory. Voices already on disk stay usable.
@@ -154,9 +156,22 @@ async function phonemize(espeakVoice: string, text: string): Promise<number[]> {
     // things it didn't, so a line here isn't a failure by itself. They're kept
     // to explain one if it comes.
     const complaints: string[] = [];
-    const fail = (error: Error) => {
+
+    // What espeak-ng said on its way down is the only account of why it went.
+    // An uncaught C++ exception arrives in JS as a bare pointer — Emscripten's
+    // `___cxa_throw` ends in `throw exceptionLast`, an integer — so the throw
+    // itself carries nothing, and these lines are the whole diagnosis. They go
+    // on every failure, not just the ones they obviously explain.
+    const fail = (reason: string) => {
       settled = true;
-      reject(error);
+      const said = complaints.join("; ").slice(0, 200);
+      reject(
+        new Error(
+          said
+            ? `the phonemizer failed: ${reason} — it said: ${said}`
+            : `the phonemizer failed: ${reason}, and said nothing`
+        )
+      );
     };
 
     void createPiperPhonemize({
@@ -192,24 +207,16 @@ async function phonemize(espeakVoice: string, text: string): Promise<number[]> {
           "/espeak-ng-data",
         ]);
         // main() returned without ever printing phonemes. Reject rather than
-        // leave the generator waiting on a promise that can't settle, and lead
-        // with whatever the phonemizer said on the way down.
-        if (!settled) {
-          fail(
-            new Error(
-              complaints.join("; ").slice(0, 200) ||
-                "the phonemizer produced no output"
-            )
-          );
-        }
+        // leave the generator waiting on a promise that can't settle.
+        if (!settled) fail("it produced no output");
       })
-      // Emscripten reports a native abort as a bare `Aborted()`, which names
-      // neither the module nor the sentence. Naming the phonemizer is the
-      // difference between a reader seeing something actionable and seeing a
-      // build flag they can't set.
+      // Emscripten reports a native abort as a bare `Aborted()`, and an
+      // uncaught C++ exception as a bare integer. Neither names the module or
+      // the sentence, which is the difference between a reader seeing
+      // something actionable and seeing a pointer.
       .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        fail(new Error(`the phonemizer failed: ${message}`));
+        console.error("[tts] phonemizer threw", error, { text, complaints });
+        fail(describeThrown(error));
       });
   });
 }
