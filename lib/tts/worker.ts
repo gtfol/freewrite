@@ -15,7 +15,8 @@
 
 import { encodeAudio } from "@/lib/tts/codec";
 import { createPiper, type Synthesis } from "@/lib/tts/piper";
-import { trimSilence, wordTimes } from "@/lib/tts/timing";
+import { synthesizeWithRecovery } from "@/lib/tts/recover";
+import { wordTimes } from "@/lib/tts/timing";
 import { engineVoiceId, findVoice } from "@/lib/tts/voices";
 import type { EngineId, WordSpan } from "@/lib/tts/types";
 
@@ -66,20 +67,24 @@ async function init(voiceId: string) {
 }
 
 async function synth(request: Extract<WorkerRequest, { type: "synth" }>) {
-  if (!engine) throw new Error("engine not initialized");
+  const ready = engine;
+  if (!ready) throw new Error("engine not initialized");
 
-  const raw = await engine.synth(request.text);
-  // Trim before measuring: the scheduler owns every millisecond of silence
-  // between chunks, so the model's own variable head and tail must go.
-  const audio = trimSilence(raw.audio, raw.sampleRate);
+  // Comes back trimmed: the scheduler owns every millisecond of silence
+  // between chunks, so the model's own variable head and tail must go. It may
+  // also come back as several engine calls stitched together — see recover.ts.
+  const { audio, sampleRate } = await synthesizeWithRecovery(
+    (text) => ready.synth(text),
+    request.text
+  );
   const times = wordTimes(
     request.text,
     request.words,
     request.normStart,
     audio,
-    raw.sampleRate
+    sampleRate
   );
-  const encoded = await encodeAudio(audio, raw.sampleRate);
+  const encoded = await encodeAudio(audio, sampleRate);
 
   post(
     {

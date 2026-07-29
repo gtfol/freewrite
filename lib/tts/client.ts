@@ -6,6 +6,7 @@
 // waiting out the chunks nobody is about to hear.
 
 import { decodeAudio } from "@/lib/tts/codec";
+import { isOutOfMemory } from "@/lib/tts/errors";
 import { getAudiobook, getChunk, putAudiobook, putChunk } from "@/lib/tts/store";
 import { findVoice } from "@/lib/tts/voices";
 import type {
@@ -21,22 +22,6 @@ import type { WorkerRequest, WorkerResponse } from "@/lib/tts/worker";
 // article from doing 300 serialisations of the same growing object.
 const PERSIST_DEBOUNCE_MS = 1500;
 
-// An exhausted wasm heap reads as an allocation failure somewhere inside the
-// engine. The model is the largest single thing it allocates, so this is the
-// shape it usually takes:
-//
-//   Can't create a session. failed to allocate a buffer of size 63201294.
-//
-// A wasm heap can grow but never shrink, and it dies only with the thread that
-// owns it, so there is no way to recover in place — which is what makes this
-// worth catching rather than just reporting.
-const OUT_OF_MEMORY =
-  /failed to allocate|out of memory|cannot enlarge memory|memory access out of bounds|abort\(oom/i;
-
-export function isOutOfMemory(message: string): boolean {
-  return OUT_OF_MEMORY.test(message);
-}
-
 // A worker can also just die — the browser kills the thread outright under
 // memory pressure, and there is no message to read afterwards. It looks like
 // silence, so it has to be turned back into an answer or the queue waits on a
@@ -47,21 +32,15 @@ function recoverable(message: string): boolean {
   return isOutOfMemory(message) || message === WORKER_DIED;
 }
 
-// The other way synthesis fails, and it is not a memory problem despite
-// arriving in the middle of one:
-//
-//   Aborted(). Build with -sASSERTIONS for more info.
-//
-// That is the phonemizer's native code reaching C `abort()` — an uncaught
-// exception out of espeak-ng, thrown by the sentence it was handed. Its heap
-// is a fixed 16MB that cannot grow, and exhausting *that* says `Aborted(OOM)`,
-// so the bare form is about the text. Restarting the engine and feeding it the
-// same sentence produces the same abort, which is why this class is skipped
-// rather than retried.
-//
-// Consecutive failures are a different claim: that says the engine is gone,
-// not that three sentences in a row are unpronounceable.
+// Consecutive failures are their own claim: that says the engine is gone, not
+// that three sentences in a row are unsayable.
 const MAX_CONSECUTIVE_FAILURES = 3;
+
+// How many times one sentence is worth attempting across the life of an
+// audiobook. Only memory failures get the second attempt — the worker has
+// already divided and retried anything else before reporting it, so a repeat
+// would be the same work for the same answer.
+const MAX_ATTEMPTS = 2;
 
 // A budget for the whole audiobook rather than per chunk. With the session
 // hoisted out of the per-chunk path this should never be spent; if something
@@ -92,10 +71,14 @@ export class AudiobookGenerator {
   private cursor = 0;
   private wantAll = false;
   private restarts = 0;
-  // Sentences the engine wouldn't produce. Held in memory and never written to
-  // the manifest: the failure is about this engine on this run, and a reload
-  // deserves a clean attempt rather than inheriting a verdict.
-  private skipped = new Set<string>();
+  // Sentences the engine wouldn't produce, and how many times it was asked.
+  // Held in memory and never written to the manifest: the failure is about
+  // this engine on this run, and a reload deserves a clean attempt rather than
+  // inheriting a verdict.
+  private attempts = new Map<string, number>();
+  // The subset that won't be asked again — either because the answer can't
+  // change, or because it has been asked enough.
+  private givenUp = new Set<string>();
   private failures = 0;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
   private book: Audiobook;
@@ -163,14 +146,16 @@ export class AudiobookGenerator {
   async audio(index: number) {
     const chunk = this.book.chunks[index];
     if (!chunk) return null;
-    // A skipped sentence answers with silence rather than nothing. Nothing
-    // reads as an underrun, and the reading would sit there waiting for audio
-    // that isn't coming; this way it pauses over the sentence and moves on,
-    // keeping the beat that follows it.
-    if (this.skipped.has(chunk.key)) {
+    if (chunk.duration === null) {
+      // Never attempted: not ready, and the player should wait for it.
+      if (!this.attempts.has(chunk.key)) return null;
+      // Attempted and not there. Silence rather than nothing — nothing reads
+      // as an underrun and the reading would sit waiting for audio that isn't
+      // coming, where this pauses over the sentence and moves on, keeping the
+      // beat that follows it. Not a verdict: a later pass that succeeds gives
+      // the sentence back, and the next play gets the audio.
       return { audio: new Float32Array(0), sampleRate: 24000 };
     }
-    if (chunk.duration === null) return null;
     const record = await getChunk(chunk.key);
     if (!record) return null;
     return decodeAudio(record);
@@ -300,22 +285,35 @@ export class AudiobookGenerator {
 
   // Still worth generating: not done, and not given up on.
   private pending(chunk: StoredChunk): boolean {
-    return chunk.duration === null && !this.skipped.has(chunk.key);
+    return chunk.duration === null && !this.givenUp.has(chunk.key);
   }
 
   // The chunk nearest ahead of the playhead wins; only once everything from
   // the cursor forward is done do we fill in behind it, which matters when a
   // listener seeks backwards or asks for the whole article.
-  private next(): number {
+  private scan(match: (chunk: StoredChunk) => boolean): number {
     const chunks = this.book.chunks;
     for (let i = this.cursor; i < chunks.length; i++) {
-      if (this.pending(chunks[i])) return i;
+      if (match(chunks[i])) return i;
     }
     if (!this.wantAll) return -1;
     for (let i = 0; i < this.cursor; i++) {
-      if (this.pending(chunks[i])) return i;
+      if (match(chunks[i])) return i;
     }
     return -1;
+  }
+
+  private next(): number {
+    const fresh = this.scan(
+      (chunk) => this.pending(chunk) && !this.attempts.has(chunk.key)
+    );
+    if (fresh !== -1) return fresh;
+
+    // Then the failures still worth another attempt. Left until last on
+    // purpose: generating the rest of the article is time for whatever caused
+    // them to pass, which is the only thing that makes asking again different
+    // from asking again immediately.
+    return this.scan((chunk) => this.pending(chunk));
   }
 
   private schedulePersist(force = false) {
@@ -372,14 +370,22 @@ export class AudiobookGenerator {
             // and worse, the player asks for the missing chunk again the
             // moment it reaches it, so failing here used to mean retrying the
             // same sentence for as long as the page stayed open.
-            this.skipped.add(chunk.key);
+            const message =
+              response.type === "error" ? response.message : "synthesis failed";
+            const tries = (this.attempts.get(chunk.key) ?? 0) + 1;
+            this.attempts.set(chunk.key, tries);
+            // Memory pressure is a fact about the tab, not about the sentence,
+            // so it earns another attempt once the rest of the article is
+            // done. Anything else has already been divided and retried inside
+            // the worker, and asking again is the same work for the same
+            // answer.
+            if (!isOutOfMemory(message) || tries >= MAX_ATTEMPTS) {
+              this.givenUp.add(chunk.key);
+            }
+
             this.failures++;
             if (this.failures >= MAX_CONSECUTIVE_FAILURES) {
-              this.emitState({
-                status: "error",
-                message:
-                  response.type === "error" ? response.message : "synthesis failed",
-              });
+              this.emitState({ status: "error", message });
               break;
             }
           }

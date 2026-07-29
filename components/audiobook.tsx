@@ -9,7 +9,8 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import type { TextIndex } from "@/lib/highlights";
-import { AudiobookGenerator, isOutOfMemory } from "@/lib/tts/client";
+import { AudiobookGenerator } from "@/lib/tts/client";
+import { isOutOfMemory } from "@/lib/tts/errors";
 import {
   clearHighlight,
   clearOverlay,
