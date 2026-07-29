@@ -177,6 +177,7 @@ function chunk(over: Partial<StoredChunk>): StoredChunk {
     speech: "some words here.",
     speechWords: [],
     scales: { length: 1, noise: 1, noiseW: 1 },
+    rises: [],
     gapAfter: 0,
     duration: 1,
     wordTimes: [],

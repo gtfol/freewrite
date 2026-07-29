@@ -62,6 +62,18 @@ const MIN_CONTEXT_CHARS = 6;
 // quotes and brackets after it.
 const TERMINATED = /[.!?…:;,—–][\s"'”’)\]]*$/;
 
+// A coordinated series needs at least this many items before the rise is worth
+// having. Two items joined by "and" usually carry no comma at all.
+const MIN_SERIES_ITEMS = 3;
+// Items in a series are short. The cap is what keeps a sentence that merely
+// has commas in it — subordinate clauses, a parenthetical aside — from being
+// read as a list.
+const MAX_ITEM_CHARS = 60;
+// The coordinator before the final item is the thing that makes a series a
+// series. An appositive ("My brother, a doctor, arrived late") has none, which
+// is exactly why it must not get list intonation.
+const COORDINATOR = /(^|[\s(])(and|or|nor|plus)([\s,)]|$)/i;
+
 function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value));
 }
@@ -103,6 +115,47 @@ export function scalesFor(role: ChunkRole, text: string): Scales {
 interface Insert {
   at: number;
   text: string;
+}
+
+// The items of a coordinated series — "toast, eggs, bacon, and milk" — as the
+// index of the last word of every item but the final one. Those are the words
+// that take a continuation rise; the last item is the only one that falls, and
+// falling is already all the model does.
+//
+// Returns nothing unless the sentence really is a series. A false positive
+// here is cheap by construction: the commas that survive the length cap and
+// sit before a coordinator are, near enough always, boundaries English would
+// have risen on anyway — the tail of a subordinate clause, or one of a pair of
+// coordinated clauses. A false negative is just the reading we have today.
+export function seriesRises(text: string, words: WordSpan[]): number[] {
+  const commas: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === ",") commas.push(i);
+  }
+  if (commas.length < MIN_SERIES_ITEMS - 1) return [];
+
+  const cuts = [-1, ...commas, text.length];
+  const items: string[] = [];
+  for (let i = 0; i < cuts.length - 1; i++) {
+    items.push(text.slice(cuts[i] + 1, cuts[i + 1]).trim());
+  }
+  if (items.some((item) => item.length > MAX_ITEM_CHARS)) return [];
+  if (!COORDINATOR.test(items[items.length - 1])) return [];
+
+  // Word indices rather than offsets, so this survives the comma inserts that
+  // emphasis would otherwise shift everything by.
+  const rises: number[] = [];
+  for (const at of commas) {
+    let last = -1;
+    for (let i = 0; i < words.length; i++) {
+      if (words[i].end <= at) last = i;
+    }
+    // Never the final word: there is nothing after it to continue into.
+    if (last >= 0 && last < words.length - 1 && !rises.includes(last)) {
+      rises.push(last);
+    }
+  }
+  return rises;
 }
 
 function trimSpan(text: string, span: WordSpan): WordSpan {
@@ -186,6 +239,10 @@ export interface SpeechPlan {
   // The same words, in the same order, as offsets into `text`.
   words: WordSpan[];
   scales: Scales;
+  // Words that end an item of a coordinated series, by index into `words`.
+  // The engine gives every one of them a terminal fall; lib/tts/pitch.ts puts
+  // the rise back afterwards.
+  rises: number[];
 }
 
 export function planSpeech(input: SpeechInput): SpeechPlan {
@@ -195,7 +252,12 @@ export function planSpeech(input: SpeechInput): SpeechPlan {
     end: span.end - normStart,
   });
 
-  const inserts = emphasisInserts(text, input.emphasis.map(local));
+  const words = input.words.map(local);
+  const rises = seriesRises(text, words);
+  // A series is already punctuated into units, and isolating one of its items
+  // between two more commas would only single out a member of a list for no
+  // reason. The rise is the whole intervention here.
+  const inserts = rises.length > 0 ? [] : emphasisInserts(text, input.emphasis.map(local));
   let speech = applyInserts(text, inserts);
 
   // An unterminated clause is delivered as one: the voice reaches the last
@@ -206,12 +268,13 @@ export function planSpeech(input: SpeechInput): SpeechPlan {
 
   return {
     text: speech,
-    words: input.words.map(local).map((word) => ({
+    words: words.map((word) => ({
       start: word.start + shift(inserts, word.start, true),
       end: word.end + shift(inserts, word.end, false),
     })),
     // Keyed off the displayed text rather than the speech text, so adding an
     // emphasis to a sentence doesn't also change its tempo.
     scales: scalesFor(input.role, text),
+    rises,
   };
 }

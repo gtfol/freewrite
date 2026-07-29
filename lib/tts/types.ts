@@ -53,6 +53,9 @@ export interface Chunk {
   // so the two coordinate spaces both have to be on hand.
   speechWords: WordSpan[];
   scales: Scales;
+  // Words that end an item of a coordinated series, by index into `words`.
+  // Each one takes a continuation rise after synthesis.
+  rises: number[];
   // Silence that follows this chunk, in milliseconds. Derived from document
   // structure, held by the scheduler rather than baked into the audio.
   gapAfter: number;

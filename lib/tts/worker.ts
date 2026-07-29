@@ -16,6 +16,7 @@
 import { encodeAudio } from "@/lib/tts/codec";
 import { describeThrown } from "@/lib/tts/errors";
 import { createPiper, type Synthesis } from "@/lib/tts/piper";
+import { applyRises } from "@/lib/tts/pitch";
 import { synthesizeWithRecovery } from "@/lib/tts/recover";
 import { wordTimes } from "@/lib/tts/timing";
 import { engineVoiceId, findVoice } from "@/lib/tts/voices";
@@ -36,6 +37,8 @@ export type WorkerRequest =
       speech: string;
       speechWords: WordSpan[];
       scales: Scales;
+      // Word indices that end an item of a coordinated series.
+      rises: number[];
     };
 
 export type WorkerResponse =
@@ -87,7 +90,20 @@ async function synth(request: Extract<WorkerRequest, { type: "synth" }>) {
   // after it early. The times come back indexed by word, and the words are the
   // same words in the same order as the ones on screen.
   const times = wordTimes(request.speech, request.speechWords, 0, audio, sampleRate);
-  const encoded = await encodeAudio(audio, sampleRate);
+
+  // Each rise runs from the item's last word to wherever the next one starts,
+  // which is the movement plus the comma's pause; pitch.ts trims the pause off
+  // for itself. Applied after timing and before encoding — it hands back the
+  // same number of samples, so `times` still describes the audio.
+  const duration = audio.length / sampleRate;
+  const raised = applyRises(
+    audio,
+    sampleRate,
+    request.rises
+      .filter((word) => word < times.length)
+      .map((word) => ({ from: times[word], to: times[word + 1] ?? duration }))
+  );
+  const encoded = await encodeAudio(raised, sampleRate);
 
   post(
     {

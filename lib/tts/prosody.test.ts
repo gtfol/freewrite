@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { planSpeech, scalesFor, type ChunkRole } from "./prosody.ts";
+import {
+  planSpeech,
+  scalesFor,
+  seriesRises,
+  type ChunkRole,
+} from "./prosody.ts";
 import type { WordSpan } from "./types.ts";
 
 // The segmenter hands prosody words in document coordinates; these fixtures
@@ -199,6 +204,82 @@ test("announces a heading more slowly than it reads a line of body", () => {
 test("does not restart a sentence that was only divided", () => {
   const line = "and the numbers were wrong all along.";
   assert.ok(scalesFor("clause", line).length < scalesFor("body", line).length);
+});
+
+// The words a rise lands on, by name, which is the only readable way to state
+// what should happen to a list.
+function risingWords(text: string): string[] {
+  const spans = words(text);
+  return seriesRises(text, spans).map((i) => text.slice(spans[i].start, spans[i].end));
+}
+
+test("rises on every item of a list but the last", () => {
+  assert.deepEqual(
+    risingWords(
+      "perfectly browned toast, eight eggs sunny side up, sixteen slices of bacon, two coffees, and two cool glasses of milk."
+    ),
+    ["toast", "up", "bacon", "coffees"]
+  );
+});
+
+test("rises on a list written without the serial comma", () => {
+  assert.deepEqual(risingWords("toast, eggs, bacon and milk."), [
+    "toast",
+    "eggs",
+  ]);
+});
+
+test("rises on a series of actions, not just of things", () => {
+  assert.deepEqual(risingWords("He arrived, sat down, and said nothing."), [
+    "arrived",
+    "down",
+  ]);
+});
+
+test("takes 'or' and 'nor' as readily as 'and'", () => {
+  assert.deepEqual(risingWords("Tea, coffee, or milk?"), ["Tea", "coffee"]);
+  assert.deepEqual(risingWords("Not tea, not coffee, nor milk."), [
+    "tea",
+    "coffee",
+  ]);
+});
+
+test("leaves an appositive alone", () => {
+  assert.deepEqual(risingWords("My brother, a doctor, arrived late."), []);
+});
+
+test("leaves a sentence that merely has commas alone", () => {
+  assert.deepEqual(
+    risingWords(
+      "Although it had been raining since the small hours, and the road was closed, he set off anyway."
+    ),
+    []
+  );
+  assert.deepEqual(risingWords("It was, really, the only way."), []);
+});
+
+test("needs three items before it calls something a list", () => {
+  assert.deepEqual(risingWords("Toast, and eggs."), []);
+});
+
+test("plans a list without also isolating one of its items", () => {
+  const text = "We had toast, eggs, bacon, and milk.";
+  const result = planSpeech({
+    text,
+    words: words(text),
+    normStart: 0,
+    role: "body",
+    emphasis: [{ start: text.indexOf("bacon"), end: text.indexOf("bacon") + 5 }],
+  });
+  assert.equal(result.text, text);
+  assert.equal(result.rises.length, 3);
+});
+
+test("counts rises in words, so emphasis elsewhere cannot shift them", () => {
+  const text = "We had toast, eggs and milk, though nobody was hungry.";
+  const plain = plan(text);
+  const emphasized = plan(text, { emphasis: "nobody" });
+  assert.deepEqual(plain.rises, emphasized.rises);
 });
 
 test("keeps the tempo of a sentence when emphasis is added to it", () => {

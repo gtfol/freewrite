@@ -278,6 +278,7 @@ export class AudiobookGenerator {
         speech: chunk.speech,
         speechWords: chunk.speechWords,
         scales: chunk.scales,
+        rises: chunk.rises,
       };
       this.worker?.postMessage(request);
     });

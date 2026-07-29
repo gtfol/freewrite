@@ -262,7 +262,9 @@ function scaleTag({ length, noise, noiseW }: Scales): string {
 // cannot contain, so no sentence can spell its way into another chunk's key.
 function chunkKey(plan: SpeechPlan, voiceId: string, model: string) {
   return sha256(
-    `${model}\0${voiceId}\0${scaleTag(plan.scales)}\0${plan.text}`
+    `${model}\0${voiceId}\0${scaleTag(plan.scales)}\0${plan.rises.join(
+      ","
+    )}\0${plan.text}`
   );
 }
 
@@ -334,6 +336,7 @@ export async function segmentArticle(
         speech: plan.text,
         speechWords: plan.words,
         scales: plan.scales,
+        rises: plan.rises,
         gapAfter: gapBetween(
           rules,
           blocks[i],
@@ -359,7 +362,10 @@ export function contentHash(chunks: Chunk[]): Promise<string> {
   return sha256(
     chunks
       .map(
-        (c) => `${c.text}\0${c.speech}\0${scaleTag(c.scales)}\0${c.gapAfter}`
+        (c) =>
+          `${c.text}\0${c.speech}\0${scaleTag(c.scales)}\0${c.rises.join(
+            ","
+          )}\0${c.gapAfter}`
       )
       .join("\n")
   );
