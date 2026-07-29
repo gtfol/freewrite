@@ -9,10 +9,15 @@ import { cn } from "@/lib/utils";
 // and place when the two swap.
 const titleClass = "text-[1.75rem] leading-tight font-semibold";
 
+// The app's icon button: muted until pointed at, then a tinted tile. Discard
+// and Save are the same two things — a way out of the editor — so they look
+// the same; weighting one of them darker read as a difference in kind.
+const iconButtonClass =
+  "inline-flex shrink-0 items-center rounded-md p-1.5 text-muted-foreground transition-[color,background-color,opacity] hover:bg-accent hover:text-foreground";
+
 // Nudged down to sit centred on the editor's first line rather than on its
 // ascender.
-const editorButtonClass =
-  "mt-[0.1em] inline-flex shrink-0 items-center rounded-sm p-1.5 transition-[color,opacity]";
+const editorButtonClass = `mt-[0.1em] ${iconButtonClass}`;
 
 // The reader's h1, renamed where it lives instead of back on the list. Long
 // titles — a PDF filename, a percent-encoded slug — wrap onto as many lines
@@ -88,7 +93,10 @@ export function ArticleTitle({
             onClick={() => setDraft(title)}
             title="Rename"
             aria-label="Rename"
-            className="ml-1.5 inline-flex -translate-y-[0.1em] items-center rounded-sm p-1.5 align-middle text-muted-foreground opacity-0 transition-[color,opacity] group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+            className={cn(
+              iconButtonClass,
+              "ml-1.5 -translate-y-[0.1em] align-middle opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+            )}
           >
             <Pencil className="size-4" />
           </button>
@@ -122,7 +130,7 @@ export function ArticleTitle({
             onClick={discard}
             title="Discard"
             aria-label="Discard"
-            className={cn(editorButtonClass, "text-muted-foreground hover:text-foreground")}
+            className={editorButtonClass}
           >
             <X className="size-4" />
           </button>
@@ -132,7 +140,7 @@ export function ArticleTitle({
             onClick={commit}
             title="Save"
             aria-label="Save"
-            className={cn(editorButtonClass, "text-foreground hover:opacity-70")}
+            className={editorButtonClass}
           >
             <Check className="size-4" />
           </button>
