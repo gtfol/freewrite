@@ -17,11 +17,15 @@ const MAX_NOTE_CHARS = 4_000;
 
 const CARD_WIDTH = 288;
 
-// Room the pill needs on a side before it will go there, and how close to the
-// top of the screen a selection has to be before the phone gives up on putting
-// its own menu above it.
-const PILL_HEIGHT = 56;
-const NATIVE_MENU = 88;
+// The pill as rendered, and the gap it keeps from the selection.
+const PILL_HEIGHT = 40;
+const PILL_GAP = 8;
+// How close to the top of the screen a selection has to be before the phone
+// gives up on putting its own menu above it: the bar measures ~44 tall sitting
+// ~19 clear of the selection, so under about that much room it flips below.
+// Anything higher than the phone's real threshold is a band where both it and
+// the pill choose "above" — which is the collision this is here to avoid.
+const NATIVE_MENU = 72;
 // The reader nav is fixed to the bottom of the screen and would sit on top of
 // a pill placed under a selection near the fold.
 const NAV_HEIGHT = 96;
@@ -35,22 +39,40 @@ const NAV_HEIGHT = 96;
 // it: whichever side the phone took, ours takes the other.
 type Place = "above" | "below";
 
-function placeFor(rect: DOMRect): Place {
+// Viewport coordinates: the side, and the y the pill is positioned at — its
+// bottom edge above a selection, its top edge below one.
+//
+// The side is the phone's to decide, so it is never traded away for room. A
+// selection near the fold has nowhere under it to put the pill; the pill slides
+// up over the last line of the selection rather than flipping to the side the
+// system bar has taken, where it would come out unreachable underneath it.
+function placeFor(rect: DOMRect): { place: Place; y: number } {
   const coarse =
     typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
   // A mouse gets no system menu to dodge, and above the selection is where a
   // Medium-style pill belongs.
-  if (!coarse) return "above";
-  if (rect.top < NATIVE_MENU) return "above";
-  const below = window.innerHeight - NAV_HEIGHT - rect.bottom;
-  return below >= PILL_HEIGHT ? "below" : "above";
+  if (!coarse || rect.top < NATIVE_MENU) {
+    // Clamped so a selection starting at the top of the screen doesn't push the
+    // pill off it.
+    return {
+      place: "above",
+      y: Math.max(rect.top - PILL_GAP, PILL_GAP + PILL_HEIGHT),
+    };
+  }
+  const floor = window.innerHeight - NAV_HEIGHT - PILL_HEIGHT;
+  // Sliding up stops at the selection's own top edge: past that is the system
+  // bar's space again. A selection in the last sliver above the nav puts the
+  // pill over the nav instead, which it outranks and stays tappable through.
+  const y = Math.min(rect.bottom + PILL_GAP, floor);
+  return { place: "below", y: Math.max(y, rect.top) };
 }
 
 // Measured when a panel opens — render must not touch refs, so the wrapper
 // width travels with the position.
 interface Pos {
   x: number;
-  top: number;
+  // Where the pill goes, per placeFor; the card hangs off the selection itself.
+  y: number;
   bottom: number;
   width: number;
   place: Place;
@@ -70,14 +92,15 @@ type Panel =
 
 function relativeTo(wrap: HTMLElement, rect: DOMRect): Pos {
   const w = wrap.getBoundingClientRect();
+  // Decided here, against the viewport, while the rect is still in viewport
+  // coordinates — Pos itself is relative to the wrapper.
+  const { place, y } = placeFor(rect);
   return {
     x: rect.left + rect.width / 2 - w.left,
-    top: rect.top - w.top,
+    y: y - w.top,
     bottom: rect.bottom - w.top,
     width: w.width,
-    // Decided here, against the viewport, while the rect is still in viewport
-    // coordinates — the rest of Pos is relative to the wrapper.
-    place: placeFor(rect),
+    place,
   };
 }
 
@@ -238,7 +261,7 @@ export function HighlightLayer({
       className={`absolute z-50 -translate-x-1/2 ${above ? "-translate-y-full" : ""}`}
       style={{
         left: clamp(panel.pos.x, 56, width - 56),
-        top: above ? panel.pos.top - 8 : panel.pos.bottom + 8,
+        top: panel.pos.y,
       }}
     >
       <div className="flex items-center rounded-full bg-foreground px-1 py-0.5 text-background shadow-lg">
