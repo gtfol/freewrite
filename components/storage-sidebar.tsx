@@ -239,8 +239,8 @@ export function StorageSidebar({
               {formatBytes(
                 (report?.clearableBytes ?? 0) + (report?.voiceBytes ?? 0)
               )}
-              . Your downloads are kept. Voice models will download again the
-              next time you listen.
+              . Your downloads are kept. Voice models will be downloaded again
+              the next time you listen.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
