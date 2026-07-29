@@ -19,6 +19,7 @@ import {
 } from "@/lib/db";
 import { audioSizes, bookBytes, type AudioSizes } from "@/lib/tts/size";
 import type { AudioRecord, Audiobook } from "@/lib/tts/types";
+import { VOICE_CACHE_DIR } from "@/lib/tts/voices";
 
 // Soft ceiling for generated audio. At ~3KB/s of Opus this is many hours of
 // listening, and eviction is by least-recently-played so the articles you
@@ -28,9 +29,6 @@ const BUDGET_BYTES = 400 * 1024 * 1024;
 // whatever the budget says — the writing side of the app must never fail to
 // save an entry because the reader filled the disk.
 const QUOTA_SHARE = 0.5;
-// Where @diffusionstudio/vits-web keeps the voice models, as one flat OPFS
-// directory of `<voiceId>.onnx` and `<voiceId>.onnx.json`.
-const VOICE_DIR = "piper";
 
 export const getAudiobook = (articleId: string) =>
   localGet<Audiobook>(AUDIOBOOKS, articleId);
@@ -111,35 +109,43 @@ export interface StorageReport extends AudioSizes {
   quotaBytes: number;
 }
 
-// vits-web says which voices are stored but not what they cost, and asking
-// huggingface for the sizes would be a network round trip to render a number.
-// The models are plain files, so measure them where they sit.
+// Measured by walking the directory rather than by asking which voices the
+// catalog knows about, so the figure covers a model left behind by a voice
+// since removed from the list. That also keeps it honest about the clear
+// below, which takes the whole directory.
+//
+// The engine can't be asked instead: it holds the model sizes, but importing
+// it would pull onnxruntime into the page that only wants to print a number.
 async function voiceBytes(): Promise<number> {
   if (typeof navigator === "undefined" || !navigator.storage?.getDirectory) {
     return 0;
   }
   try {
-    const vits = await import("@diffusionstudio/vits-web");
-    const stored = await vits.stored();
-    if (stored.length === 0) return 0;
-
     const root = await navigator.storage.getDirectory();
-    const dir = await root.getDirectoryHandle(VOICE_DIR);
-    const sizes = await Promise.all(
-      stored
-        .flatMap((id) => [`${id}.onnx`, `${id}.onnx.json`])
-        .map(async (name) => {
-          try {
-            return (await (await dir.getFileHandle(name)).getFile()).size;
-          } catch {
-            return 0;
-          }
-        })
-    );
-    return sizes.reduce((sum, size) => sum + size, 0);
+    const dir = await root.getDirectoryHandle(VOICE_CACHE_DIR);
+    let total = 0;
+    for await (const handle of dir.values()) {
+      // `kind` doesn't narrow: FileSystemHandle is a base interface rather
+      // than a discriminated union of the two handle types.
+      if (handle.kind !== "file") continue;
+      total += (await (handle as FileSystemFileHandle).getFile()).size;
+    }
+    return total;
   } catch {
-    // Nothing has been downloaded yet, or the browser has no OPFS.
+    // No directory yet, or the browser has no OPFS.
     return 0;
+  }
+}
+
+async function removeVoices(): Promise<void> {
+  if (typeof navigator === "undefined" || !navigator.storage?.getDirectory) {
+    return;
+  }
+  try {
+    const root = await navigator.storage.getDirectory();
+    await root.removeEntry(VOICE_CACHE_DIR, { recursive: true });
+  } catch {
+    // Nothing there to remove.
   }
 }
 
@@ -167,9 +173,7 @@ export async function clearCache(): Promise<void> {
     .map((book) => book.articleId);
   if (unpinned.length > 0) await localDeleteMany(AUDIOBOOKS, unpinned);
   await collectGarbage();
-
-  const vits = await import("@diffusionstudio/vits-web");
-  await vits.flush();
+  await removeVoices();
 }
 
 // Deletes rather than unpins: someone reaching for this wants the space back,

@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["pg"],
-  // The Piper voice engine is Emscripten output that ships one bundle for Node
+  // The Piper phonemizer is Emscripten output that ships one bundle for Node
   // and the browser, referencing `fs`/`path` behind a runtime isNode check that
   // is never true here. Nothing to refactor — the imports are in third-party
   // WASM glue — so point them at an empty module.

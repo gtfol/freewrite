@@ -30,6 +30,13 @@
      something you saved, the other is where the voice is right now. */
   --read-sentence: oklch(0.96 0.035 85);
   --read-word: oklch(0.88 0.11 85);
+  /* Where a click would send the voice. Grey rather than a third hue: it is a
+     preview of an action, not a place in the text, and it has to sit under the
+     read-along without competing with it. Translucent because it follows the
+     cursor across the whole article — an opaque wash would blank out saved
+     annotations everywhere the mouse went. */
+  --seek-sentence: oklch(0.55 0 0 / 7%);
+  --seek-word: oklch(0.45 0 0 / 16%);
   --syntax-key: oklch(0.48 0.1 240);
   --syntax-string: oklch(0.5 0.11 150);
   --syntax-number: oklch(0.5 0.14 265);
@@ -62,6 +69,8 @@
   --highlight-accent: oklch(0.72 0.12 152);
   --read-sentence: oklch(0.42 0.05 85 / 35%);
   --read-word: oklch(0.62 0.1 85 / 55%);
+  --seek-sentence: oklch(1 0 0 / 7%);
+  --seek-word: oklch(1 0 0 / 18%);
   --syntax-key: oklch(0.75 0.09 240);
   --syntax-string: oklch(0.76 0.11 150);
   --syntax-number: oklch(0.76 0.11 265);
@@ -262,6 +271,22 @@
 }
 ::highlight(tts-word) {
   background-color: var(--read-word);
+}
+
+/* Click-to-seek preview. Painted under the read-along by priority, so hovering
+   the sentence being spoken shows the target without hiding the voice. */
+::highlight(tts-seek-sentence) {
+  background-color: var(--seek-sentence);
+}
+::highlight(tts-seek-word) {
+  background-color: var(--seek-word);
+}
+
+/* Seeking is a click on prose, which nothing about prose advertises. The
+   pointer is the other half of that hint; it appears only while a transport
+   exists to seek, so ordinary reading keeps its text cursor. */
+[data-tts-seekable] {
+  cursor: pointer;
 }
 
 /* Embedded media in the side-by-side preview. Everything renders as a modest
