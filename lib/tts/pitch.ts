@@ -77,6 +77,18 @@ const MAX_F0 = 400;
 // this; a fricative, which is noise with a spectral tilt, sits well below it
 // however loud it happens to be.
 const VOICED_CORRELATION = 0.4;
+// Zero crossings per sample, measured on the full-band audio.
+//
+// Periodicity alone is not enough, because a voiced fricative has both: the
+// folds are vibrating and the constriction is hissing. Decimating for the
+// correlation low-passes the hiss away and leaves a convincingly periodic
+// murmur, so the /z/ of "eyes" passes a periodicity test and is then spliced on
+// the full-band signal, where the noise is what dominates — the same buzz as
+// the /s/ of "gas", arrived at from the opposite direction. Crossing rate is
+// the measurement the low-pass hasn't touched: a vowel crosses at roughly
+// twice its first formant, a sibilant at several times that, whether or not it
+// is voiced.
+const MAX_ZERO_CROSSING_RATE = 0.12;
 // Relative to the span's own peak, so this tracks the speaker rather than an
 // absolute level the two engines would disagree about.
 const VOICED_LEVEL_RATIO = 0.06;
@@ -99,9 +111,14 @@ function examine(
   at: number,
   window: number,
   sampleRate: number
-): { level: number; periodic: number } {
+): { level: number; periodic: number; crossings: number } {
   let energy = 0;
-  for (let i = 0; i < window; i++) energy += audio[at + i] * audio[at + i];
+  let crossings = 0;
+  for (let i = 0; i < window; i++) {
+    const sample = audio[at + i];
+    energy += sample * sample;
+    if (i > 0 && sample < 0 !== audio[at + i - 1] < 0) crossings++;
+  }
   const level = Math.sqrt(energy / window);
 
   const count = Math.floor(window / DECIMATION);
@@ -129,7 +146,7 @@ function examine(
     const norm = Math.sqrt(here * there);
     if (norm > 1e-12) best = Math.max(best, dot / norm);
   }
-  return { level, periodic: best };
+  return { level, periodic: best, crossings: crossings / window };
 }
 
 // The last stretch of voiced audio in the span — which is both where the rise
@@ -152,7 +169,12 @@ function voicedRun(
   const hop = Math.max(1, Math.round(sampleRate * VOICING_HOP));
   if (to - from < window) return null;
 
-  const frames: { at: number; level: number; periodic: number }[] = [];
+  const frames: {
+    at: number;
+    level: number;
+    periodic: number;
+    crossings: number;
+  }[] = [];
   let peak = 0;
   for (let at = from; at + window <= to; at += hop) {
     const frame = examine(audio, at, window, sampleRate);
@@ -163,7 +185,10 @@ function voicedRun(
 
   const floor = peak * VOICED_LEVEL_RATIO;
   const voiced = frames.map(
-    (frame) => frame.level >= floor && frame.periodic >= VOICED_CORRELATION
+    (frame) =>
+      frame.level >= floor &&
+      frame.periodic >= VOICED_CORRELATION &&
+      frame.crossings <= MAX_ZERO_CROSSING_RATE
   );
 
   let end = -1;

@@ -71,7 +71,10 @@ const TERMINATED = /[.!?…:;,—–][\s"'”’)\]]*$/;
 // 2: the rise was being placed by loudness, which put it over the fricative an
 //    item ends on. WSOLA has no pitch periods to splice on there, so it came
 //    out as a short metallic burst. Now placed by periodicity. See pitch.ts.
-export const RISE_REVISION = 2;
+// 3: periodicity alone still admitted the voiced fricatives — "eyes", not just
+//    "gas" — since decimating for the correlation low-passes their hiss away.
+//    Crossing rate now has to agree.
+export const RISE_REVISION = 3;
 
 // A coordinated series needs at least this many items before the rise is worth
 // having. Two items joined by "and" usually carry no comma at all.

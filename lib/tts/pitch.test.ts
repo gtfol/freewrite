@@ -32,6 +32,21 @@ function fricative(seconds: number, sampleRate = RATE): Float32Array {
   return audio;
 }
 
+// A voiced fricative — the /z/ of "eyes". The folds are vibrating and the
+// constriction is hissing at the same time, so it is periodic and noisy at
+// once, and the periodicity alone will vouch for it.
+function voicedFricative(
+  f0: number,
+  seconds: number,
+  sampleRate = RATE
+): Float32Array {
+  const tone = voiced(f0, seconds, sampleRate);
+  const hiss = fricative(seconds, sampleRate);
+  const audio = new Float32Array(tone.length);
+  for (let i = 0; i < audio.length; i++) audio[i] = tone[i] * 0.5 + hiss[i] * 0.7;
+  return audio;
+}
+
 function concat(...parts: Float32Array[]): Float32Array {
   const out = new Float32Array(parts.reduce((n, p) => n + p.length, 0));
   let at = 0;
@@ -202,6 +217,31 @@ test("still lifts the vowel before that fricative", () => {
   const top = pitchAt(raised, Math.round(0.235 * RATE), Math.round(0.29 * RATE));
   assert.ok(
     Math.abs(semitonesBetween(120, top) - RISE_SEMITONES) < 0.8,
+    `expected the rise on the vowel, got ${semitonesBetween(120, top).toFixed(2)} semitones`
+  );
+});
+
+// "electric eyes": the /z/ is voiced, so periodicity vouches for it, and
+// decimating for the correlation is exactly what hides the hiss that should
+// have disqualified it.
+test("never touches a voiced fricative either", () => {
+  const vowel = voiced(120, 0.28);
+  const buzz = voicedFricative(120, 0.12);
+  const audio = concat(vowel, buzz);
+
+  const raised = applyRises(audio, RATE, [{ from: 0, to: 0.4 }]);
+  for (let i = vowel.length; i < audio.length; i++) {
+    assert.equal(raised[i], audio[i], `sample ${i} of the voiced fricative moved`);
+  }
+});
+
+test("still lifts the diphthong before a voiced fricative", () => {
+  const audio = concat(voiced(120, 0.28), voicedFricative(120, 0.12));
+  const raised = applyRises(audio, RATE, [{ from: 0, to: 0.4 }]);
+
+  const top = pitchAt(raised, Math.round(0.215 * RATE), Math.round(0.27 * RATE));
+  assert.ok(
+    Math.abs(semitonesBetween(120, top) - RISE_SEMITONES) < 0.9,
     `expected the rise on the vowel, got ${semitonesBetween(120, top).toFixed(2)} semitones`
   );
 });
