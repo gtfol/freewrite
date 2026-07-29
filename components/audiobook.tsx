@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/popover";
 import type { TextIndex } from "@/lib/highlights";
 import { AudiobookGenerator } from "@/lib/tts/client";
+import { isOutOfMemory } from "@/lib/tts/errors";
 import {
   clearHighlight,
   clearOverlay,
@@ -136,6 +137,15 @@ export function Audiobook({
   useEffect(() => {
     void requestPersistence();
   }, []);
+
+  // The status line is for the reader, so the engine's own account of a
+  // failure has to land somewhere it can still be read. Here rather than in
+  // the status expression, which runs on every render.
+  useEffect(() => {
+    if (generation.status === "error") {
+      console.error("[tts] generation failed:", generation.message);
+    }
+  }, [generation]);
 
   const paint = useCallback(
     (chunkIndex: number, wordIndex: number) => {
@@ -446,11 +456,26 @@ export function Audiobook({
 
   const status = (() => {
     if (generation.status === "error") {
+      // Restarting the engine is already tried before this is ever shown, so
+      // by here it's a real dead end and the message has to say what to do.
+      if (isOutOfMemory(generation.message)) {
+        return "Ran out of memory for the voice — try closing other tabs.";
+      }
+      // Sentences the voice won't read are skipped, so reaching here means it
+      // stopped reading several in a row.
+      if (/phonemizer|aborted\(/i.test(generation.message)) {
+        return "This voice couldn't read the article — try another voice.";
+      }
       // Voices are fetched on first use, so the common failure is the network
       // rather than anything the raw message would help with.
-      return /fetch|network|load|http/i.test(generation.message)
-        ? "Couldn't download the voice — check your connection."
-        : generation.message;
+      if (/fetch|network|load|http/i.test(generation.message)) {
+        return "Couldn't download the voice — check your connection.";
+      }
+      // Everything past here is the engine talking to itself. It once put a
+      // wasm exception pointer in this line, rendered as a bare `4190029960`
+      // where the reader expected to be told something. Whatever it says goes
+      // to the console; the line gets a sentence.
+      return "Something went wrong generating the audio.";
     }
     if (generation.status === "loading-model") {
       return `Downloading voice… ${Math.round(generation.progress * 100)}%`;
