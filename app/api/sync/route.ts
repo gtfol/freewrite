@@ -3,11 +3,13 @@ import type { PoolClient } from "pg";
 
 import { getAuth } from "@/lib/server/auth";
 import { getPool } from "@/lib/server/db";
+import { parseSketches } from "@/lib/sketch";
 import type {
   Article,
   Entry,
   Highlight,
   PushOutcome,
+  Sketch,
   SyncChange,
   SyncCollectionResult,
   SyncRow,
@@ -42,6 +44,10 @@ function asEntry(v: unknown): Entry | null {
   if (typeof v !== "object" || v === null) return null;
   const e = v as Record<string, unknown>;
   const content = asText(e.content, MAX_ENTRY_CHARS);
+  // Malformed sketches reject the whole change for the same reason malformed
+  // highlights do — see asHighlights above.
+  const sketches = parseSketches(e.sketches);
+  if (sketches === false) return null;
   if (
     !isId(e.id) ||
     content === null ||
@@ -54,6 +60,7 @@ function asEntry(v: unknown): Entry | null {
   return {
     id: e.id,
     content,
+    ...(sketches !== null && { sketches }),
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
     deletedAt: (e.deletedAt as number | null | undefined) ?? null,
@@ -178,6 +185,7 @@ const numOrNull = (v: unknown): number | null => (v === null ? null : Number(v))
 interface EntryRowShape {
   id: string;
   content: string;
+  sketches: Sketch[] | null;
   created_at: unknown;
   updated_at: unknown;
   deleted_at: unknown;
@@ -190,6 +198,7 @@ function entryRow(r: EntryRowShape): SyncRow<Entry> {
     record: {
       id: r.id,
       content: r.content,
+      ...(r.sketches?.length && { sketches: r.sketches }),
       createdAt: num(r.created_at),
       updatedAt: num(r.updated_at),
       deletedAt: numOrNull(r.deleted_at),
@@ -248,7 +257,11 @@ function articleRow(r: ArticleRowShape): SyncRow<Article> {
 const highlightsParam = (a: Article): string | null =>
   a.highlights?.length ? JSON.stringify(a.highlights) : null;
 
-const ENTRY_COLS = "id, content, created_at, updated_at, deleted_at, seq, hash";
+const sketchesParam = (e: Entry): string | null =>
+  e.sketches?.length ? JSON.stringify(e.sketches) : null;
+
+const ENTRY_COLS =
+  "id, content, sketches, created_at, updated_at, deleted_at, seq, hash";
 const ARTICLE_COLS =
   "id, url, title, byline, site_name, excerpt, content, content_original, word_count, saved_at, read_at, via, highlights, updated_at, deleted_at, seq, hash";
 
@@ -264,11 +277,15 @@ async function pushEntry(
   const e = change.record;
 
   const inserted = await client.query(
-    `insert into entries (id, user_id, content, created_at, updated_at, deleted_at, hash)
-     values ($1, $2, $3, $4, $5, $6, $7)
+    `insert into entries (id, user_id, content, sketches, created_at, updated_at,
+       deleted_at, hash)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)
      on conflict (id) do nothing
      returning seq`,
-    [e.id, uid, e.content, e.createdAt, e.updatedAt, e.deletedAt, change.hash]
+    [
+      e.id, uid, e.content, sketchesParam(e), e.createdAt, e.updatedAt,
+      e.deletedAt, change.hash,
+    ]
   );
   if (inserted.rowCount) {
     return { id: e.id, status: "ok", rev: num(inserted.rows[0].seq), hash: change.hash };
@@ -290,11 +307,14 @@ async function pushEntry(
     }
     if (num(current.seq) === change.baseRev || current.hash === "") {
       const updated = await client.query(
-        `update entries set content = $3, updated_at = $4, deleted_at = $5,
-           hash = $6, seq = nextval('sync_seq')
-         where id = $1 and user_id = $2 and seq = $7
+        `update entries set content = $3, sketches = $4, updated_at = $5,
+           deleted_at = $6, hash = $7, seq = nextval('sync_seq')
+         where id = $1 and user_id = $2 and seq = $8
          returning seq`,
-        [e.id, uid, e.content, e.updatedAt, e.deletedAt, change.hash, current.seq]
+        [
+          e.id, uid, e.content, sketchesParam(e), e.updatedAt, e.deletedAt,
+          change.hash, current.seq,
+        ]
       );
       if (updated.rowCount) {
         return { id: e.id, status: "ok", rev: num(updated.rows[0].seq), hash: change.hash };

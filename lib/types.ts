@@ -1,8 +1,29 @@
+import type { Stroke } from "drawesome";
+
+// A drawing made with the / command. Strokes are drawesome's own plain data;
+// the board they were sampled against travels with them, because a point only
+// means anything relative to it. No timestamps: the entry's updatedAt already
+// says when the drawing changed, and a per-sketch clock would differ between
+// devices that agree on every stroke.
+export interface Sketch {
+  id: string;
+  w: number;
+  h: number;
+  /** Paper colour, kept with the drawing so it renders the same everywhere. */
+  bg: string;
+  strokes: Stroke[];
+}
+
 export interface Entry {
   id: string;
   createdAt: number;
   updatedAt: number;
   content: string;
+  // The entry text references these by id — ![sketch](sketch:a3f1) — which is
+  // what gives a drawing a place in the prose without putting tens of
+  // kilobytes of stroke data in the middle of a sentence. Absent when the
+  // entry has no drawings — never an empty array.
+  sketches?: Sketch[];
   deletedAt?: number | null;
 }
 

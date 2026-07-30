@@ -1,6 +1,8 @@
 import { randomBytes, timingSafeEqual } from "crypto";
 
 import { ALL_FONTS, DEFAULT_FONT_ID, DEFAULT_FONT_SIZE } from "@/lib/fonts";
+import { parseSketches } from "@/lib/sketch";
+import type { Sketch } from "@/lib/types";
 
 // Ephemeral article snapshots for the reader's chat link-out, stored in
 // Upstash Redis / Vercel KV via its REST API (plain fetch, no client dep).
@@ -93,6 +95,9 @@ export interface EntryShareSnapshot {
   content: string;
   fontId: string;
   fontSize: number;
+  // The drawings the content references, so a shared entry shows its
+  // whiteboards rather than a row of empty frames.
+  sketches?: Sketch[];
   createdAt: number;
   sharedAt: number;
 }
@@ -107,6 +112,7 @@ export function entrySnapshotFromBody(body: {
   content?: unknown;
   fontId?: unknown;
   fontSize?: unknown;
+  sketches?: unknown;
   createdAt?: unknown;
 }): EntryShareSnapshot | { error: string; status: number } {
   const content = typeof body.content === "string" ? body.content : "";
@@ -115,6 +121,13 @@ export function entrySnapshotFromBody(body: {
   }
   if (content.length > MAX_ENTRY_CHARS) {
     return { error: "That entry is too large to share", status: 413 };
+  }
+
+  // The snapshot is public and its drawings are injected into the page as SVG,
+  // so what a reader gets is whatever survives the same validator sync uses.
+  const sketches = parseSketches(body.sketches);
+  if (sketches === false) {
+    return { error: "That entry's drawings couldn't be read", status: 400 };
   }
 
   const fontId = ALL_FONTS.some((f) => f.id === body.fontId)
@@ -132,7 +145,14 @@ export function entrySnapshotFromBody(body: {
       ? body.createdAt
       : Date.now();
 
-  return { content, fontId, fontSize, createdAt, sharedAt: Date.now() };
+  return {
+    content,
+    fontId,
+    fontSize,
+    ...(sketches !== null && { sketches }),
+    createdAt,
+    sharedAt: Date.now(),
+  };
 }
 
 function entryKey(id: string): string {
@@ -159,6 +179,10 @@ async function readEntryShare(
       return null;
     }
     if (typeof parsed.token !== "string") return null;
+    // Re-validated on the way out as well as in: the snapshot is only as
+    // trustworthy as the store it spent the last half hour in, and its
+    // drawings end up as markup on a public page.
+    const sketches = parseSketches(parsed.sketches);
     return {
       content: parsed.content,
       fontId:
@@ -167,6 +191,7 @@ async function readEntryShare(
         typeof parsed.fontSize === "number"
           ? parsed.fontSize
           : DEFAULT_FONT_SIZE,
+      ...(sketches !== null && sketches !== false && { sketches }),
       createdAt:
         typeof parsed.createdAt === "number" ? parsed.createdAt : Date.now(),
       sharedAt:

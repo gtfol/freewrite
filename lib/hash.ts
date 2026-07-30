@@ -1,3 +1,4 @@
+import { sketchFields } from "@/lib/sketch";
 import type { Article, Entry } from "@/lib/types";
 
 async function sha256Hex(input: string): Promise<string> {
@@ -14,7 +15,13 @@ async function sha256Hex(input: string): Promise<string> {
 // updatedAt stay out so identical content hashes identically on every device,
 // and read-state hashes as a boolean so wall-clock differences don't diverge.
 export function entryHash(e: Entry): Promise<string> {
-  return sha256Hex(JSON.stringify([e.content, e.deletedAt ? 1 : 0]));
+  const fields: unknown[] = [e.content, e.deletedAt ? 1 : 0];
+  // Appended only when drawings exist, so shipping the feature doesn't change
+  // the hash of — and re-push — every already-synced entry.
+  if (e.sketches?.length) {
+    fields.push(e.sketches.map(sketchFields));
+  }
+  return sha256Hex(JSON.stringify(fields));
 }
 
 export function articleHash(a: Article): Promise<string> {

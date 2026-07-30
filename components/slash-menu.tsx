@@ -3,26 +3,46 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { caretPoint } from "@/lib/caret";
+import { newSketchId, sketchBefore, sketchRef } from "@/lib/sketch";
 import { trackMarkdown } from "@/lib/spotify";
 import { useSpotify } from "@/lib/spotify-connect";
 import { useWriter } from "@/lib/store";
 import { useSync } from "@/lib/sync";
 
-// Type "/" and the day's song is a keystroke away. One command, so there is no
-// list to navigate: arrows move the caret and close the menu, the way they
-// would if it weren't there.
+// Type "/" and the two things you can drop into an entry are a keystroke away:
+// the song you played most today, and a whiteboard.
 
 const MENU_WIDTH = 288;
 // Enough to decide whether the menu fits below the caret before it renders.
-const MENU_HEIGHT = 76;
+const ROW_HEIGHT = 60;
+const MENU_PADDING = 16;
 
-const LABEL = "Song of the day";
-const KEYWORDS = ["song", "spotify", "music", "track", "day", "listening"];
+const SONG_KEYWORDS = ["song", "spotify", "music", "track", "day", "listening"];
+const DRAW_KEYWORDS = [
+  "draw",
+  "drawing",
+  "whiteboard",
+  "sketch",
+  "canvas",
+  "board",
+  "doodle",
+];
 
-function matchesQuery(query: string): boolean {
+interface Item {
+  key: string;
+  label: string;
+  hint: string;
+  keywords: string[];
+  run: () => void;
+}
+
+function matchesQuery(item: Item, query: string): boolean {
   if (!query) return true;
   const q = query.toLowerCase();
-  return LABEL.toLowerCase().includes(q) || KEYWORDS.some((k) => k.startsWith(q));
+  return (
+    item.label.toLowerCase().includes(q) ||
+    item.keywords.some((k) => k.startsWith(q))
+  );
 }
 
 // "/" only opens the menu where a word could start, so "and/or" and the
@@ -38,7 +58,10 @@ interface Point {
   left: number;
 }
 
-export function useSlashMenu(ref: React.RefObject<HTMLTextAreaElement | null>) {
+export function useSlashMenu(
+  ref: React.RefObject<HTMLTextAreaElement | null>,
+  { onDraw }: { onDraw: (sketchId: string) => void }
+) {
   const configured = useSync((s) => s.providers.spotify);
   const signedIn = Boolean(useSync((s) => s.user));
   const linked = useSpotify((s) => s.linked);
@@ -56,12 +79,15 @@ export function useSlashMenu(ref: React.RefObject<HTMLTextAreaElement | null>) {
   const [query, setQuery] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [point, setPoint] = useState<Point | null>(null);
+  const [cursor, setCursor] = useState(0);
+  // The drawing this "/" was typed against, if it followed one.
+  const [editing, setEditing] = useState<string | null>(null);
 
   // Measured here rather than in an effect: the handlers that move the menu
   // run after the DOM already holds the new text, so this is the moment the
   // caret's position is knowable, and it saves a render to find out.
   const place = useCallback(
-    (index: number | null) => {
+    (index: number | null, rows: number) => {
       const el = ref.current;
       if (el === null || index === null) {
         setPoint(null);
@@ -70,12 +96,13 @@ export function useSlashMenu(ref: React.RefObject<HTMLTextAreaElement | null>) {
       const caret = caretPoint(el, index);
       if (!caret) return;
       const rect = el.getBoundingClientRect();
+      const height = rows * ROW_HEIGHT + MENU_PADDING;
       const below = rect.top + caret.top + caret.lineHeight;
       // Writing near the bottom of the window puts the menu above the caret
       // instead, where there's room for it.
-      const flip = below + MENU_HEIGHT > window.innerHeight;
+      const flip = below + height > window.innerHeight;
       setPoint({
-        top: flip ? rect.top + caret.top - MENU_HEIGHT : below,
+        top: flip ? rect.top + caret.top - height : below,
         left: Math.min(
           rect.left + caret.left,
           window.innerWidth - MENU_WIDTH - 12
@@ -85,19 +112,25 @@ export function useSlashMenu(ref: React.RefObject<HTMLTextAreaElement | null>) {
     [ref]
   );
 
+  // Both commands are offered unless Spotify is switched off on the
+  // deployment, in which case the song simply isn't one of them.
+  const rowCount = configured ? 2 : 1;
+
   const move = useCallback(
     (index: number | null) => {
       atRef.current = index;
       setAt(index);
-      place(index);
+      place(index, rowCount);
     },
-    [place]
+    [place, rowCount]
   );
 
   const close = useCallback(() => {
     move(null);
     setQuery("");
     setNote(null);
+    setCursor(0);
+    setEditing(null);
   }, [move]);
 
   // Re-derives the menu from wherever the caret actually is. Called on every
@@ -105,7 +138,7 @@ export function useSlashMenu(ref: React.RefObject<HTMLTextAreaElement | null>) {
   // typing does.
   const sync = useCallback(() => {
     const el = ref.current;
-    if (!el || !configured) return;
+    if (!el) return;
     const caret = el.selectionStart;
     const start = atRef.current;
 
@@ -113,6 +146,8 @@ export function useSlashMenu(ref: React.RefObject<HTMLTextAreaElement | null>) {
       if (caret > 0 && opensAt(el.value, caret - 1)) {
         setQuery("");
         setNote(null);
+        setCursor(0);
+        setEditing(sketchBefore(el.value, caret - 1));
         move(caret - 1);
       }
       return;
@@ -128,49 +163,31 @@ export function useSlashMenu(ref: React.RefObject<HTMLTextAreaElement | null>) {
       return;
     }
     setQuery(next);
+    // Narrowing the list changes how tall the menu is, and a new query starts
+    // from the top of what's left.
+    setCursor(0);
     // Typing can rewrap the line the "/" sits on and move it.
-    place(start);
-  }, [ref, configured, move, close, place]);
+    place(start, rowCount);
+  }, [ref, move, close, place, rowCount]);
 
-  const showing = at !== null && matchesQuery(query);
-
-  // Look up the connection once the menu is actually in use, and warm the
-  // song so Enter doesn't wait on a round trip.
-  useEffect(() => {
-    if (!showing || !signedIn) return;
-    if (linked === null) void refreshLink();
-    else if (linked) void loadSong();
-  }, [showing, signedIn, linked, refreshLink, loadSong]);
-
-  // The caret can move under the menu without the text changing at all.
-  useEffect(() => {
-    if (!showing) return;
-    const reposition = () => place(atRef.current);
-    const el = ref.current;
-    el?.addEventListener("scroll", reposition);
-    window.addEventListener("resize", reposition);
-    return () => {
-      el?.removeEventListener("scroll", reposition);
-      window.removeEventListener("resize", reposition);
-    };
-  }, [showing, ref, place]);
-
-  const insert = useCallback(
+  // Replaces the "/song" you typed — the command, not your writing, which is
+  // why this runs even with backspace turned off.
+  const replaceCommand = useCallback(
     (text: string) => {
       const el = ref.current;
       const start = atRef.current;
       if (!el || start === null) return;
       const end = el.selectionStart;
       el.focus();
-      // Replaces the "/song" you typed — the command, not your writing, which
-      // is why this runs even with backspace turned off.
       el.setSelectionRange(start, end);
       let applied = false;
       try {
         // execCommand keeps the browser's undo stack intact and fires the
         // input event, so the debounced save runs — the same reason the list
         // edits in editor.tsx go through it.
-        applied = document.execCommand("insertText", false, text);
+        applied = text
+          ? document.execCommand("insertText", false, text)
+          : document.execCommand("delete");
       } catch {
         applied = false;
       }
@@ -184,7 +201,7 @@ export function useSlashMenu(ref: React.RefObject<HTMLTextAreaElement | null>) {
     [ref, setContent, close]
   );
 
-  const run = useCallback(async () => {
+  const runSong = useCallback(async () => {
     if (!signedIn) {
       setNote("Sign in first — the cloud at the bottom right.");
       return;
@@ -199,7 +216,7 @@ export function useSlashMenu(ref: React.RefObject<HTMLTextAreaElement | null>) {
     if (!current) return;
     switch (current.state) {
       case "ok":
-        insert(`${trackMarkdown(current.song.track)} `);
+        replaceCommand(`${trackMarkdown(current.song.track)} `);
         return;
       case "empty":
         setNote("Nothing played yet today.");
@@ -214,7 +231,87 @@ export function useSlashMenu(ref: React.RefObject<HTMLTextAreaElement | null>) {
         setNote(current.message);
         return;
     }
-  }, [signedIn, linked, connect, loadSong, insert]);
+  }, [signedIn, linked, connect, loadSong, replaceCommand]);
+
+  const runDraw = useCallback(() => {
+    if (editing) {
+      // The reference is already in the text; the command just goes away.
+      replaceCommand("");
+      onDraw(editing);
+      return;
+    }
+    const id = newSketchId();
+    // The reference lands now rather than on the first stroke: it keeps the
+    // insertion on the browser's undo stack, and it means a drawing can't be
+    // orphaned by a tab that closes mid-stroke. Close the board without
+    // drawing anything and the editor takes it back out again.
+    replaceCommand(`${sketchRef(id)} `);
+    onDraw(id);
+  }, [editing, replaceCommand, onDraw]);
+
+  // What the song row says depends on how far along the connection is.
+  let songLabel = "Song of the day";
+  let songHint = "most played since midnight";
+  if (!signedIn) {
+    songHint = "sign in to connect Spotify";
+  } else if (linked === false) {
+    songLabel = "Connect Spotify";
+    songHint = "once, then / finds today's song";
+  } else if (loading) {
+    songHint = "asking Spotify…";
+  } else if (song?.state === "ok") {
+    const { track, plays } = song.song;
+    songHint = `${track.name} · ${track.artist}${plays > 1 ? ` · ${plays} plays` : ""}`;
+  } else if (song?.state === "empty") {
+    songHint = "nothing played yet today";
+  } else if (song?.state === "reconnect") {
+    songLabel = "Reconnect Spotify";
+    songHint = "access expired";
+  }
+
+  const songItem: Item | null = configured
+    ? {
+        key: "song",
+        label: songLabel,
+        hint: note ?? songHint,
+        keywords: SONG_KEYWORDS,
+        run: () => void runSong(),
+      }
+    : null;
+  const drawItem: Item = {
+    key: "draw",
+    label: editing ? "Edit whiteboard" : "Whiteboard",
+    hint: editing ? "reopen the drawing above" : "draw, and it lands here",
+    keywords: DRAW_KEYWORDS,
+    run: runDraw,
+  };
+  const items = songItem ? [songItem, drawItem] : [drawItem];
+
+  const visible = items.filter((item) => matchesQuery(item, query));
+  const selected = Math.min(cursor, Math.max(0, visible.length - 1));
+  const showing = at !== null && visible.length > 0;
+  const songShowing = showing && visible.some((item) => item.key === "song");
+
+  // Look up the connection once the song is actually on offer, and warm it so
+  // Enter doesn't wait on a round trip.
+  useEffect(() => {
+    if (!songShowing || !signedIn) return;
+    if (linked === null) void refreshLink();
+    else if (linked) void loadSong();
+  }, [songShowing, signedIn, linked, refreshLink, loadSong]);
+
+  // The caret can move under the menu without the text changing at all.
+  useEffect(() => {
+    if (!showing) return;
+    const reposition = () => place(atRef.current, rowCount);
+    const el = ref.current;
+    el?.addEventListener("scroll", reposition);
+    window.addEventListener("resize", reposition);
+    return () => {
+      el?.removeEventListener("scroll", reposition);
+      window.removeEventListener("resize", reposition);
+    };
+  }, [showing, ref, place, rowCount]);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
@@ -226,35 +323,27 @@ export function useSlashMenu(ref: React.RefObject<HTMLTextAreaElement | null>) {
       }
       if (event.key === "Enter" || event.key === "Tab") {
         event.preventDefault();
-        void run();
+        visible[selected]?.run();
+        return true;
+      }
+      // Up and down pick, but only when there is something to pick between.
+      // Narrowed to one command they go back to being caret keys, which is
+      // what they are when the menu isn't there.
+      if (
+        (event.key === "ArrowDown" || event.key === "ArrowUp") &&
+        visible.length > 1
+      ) {
+        event.preventDefault();
+        const step = event.key === "ArrowDown" ? 1 : visible.length - 1;
+        setCursor((c) => (Math.min(c, visible.length - 1) + step) % visible.length);
         return true;
       }
       // Moving the caret means you're writing, not picking.
       if (event.key.startsWith("Arrow")) close();
       return false;
     },
-    [showing, close, run]
+    [showing, close, visible, selected]
   );
-
-  // What the row says depends on how far along the connection is.
-  let label = LABEL;
-  let hint = "most played since midnight";
-  if (!signedIn) {
-    hint = "sign in to connect Spotify";
-  } else if (linked === false) {
-    label = "Connect Spotify";
-    hint = "once, then / finds today's song";
-  } else if (loading) {
-    hint = "asking Spotify…";
-  } else if (song?.state === "ok") {
-    const { track, plays } = song.song;
-    hint = `${track.name} · ${track.artist}${plays > 1 ? ` · ${plays} plays` : ""}`;
-  } else if (song?.state === "empty") {
-    hint = "nothing played yet today";
-  } else if (song?.state === "reconnect") {
-    label = "Reconnect Spotify";
-    hint = "access expired";
-  }
 
   const node =
     showing && point ? (
@@ -264,20 +353,26 @@ export function useSlashMenu(ref: React.RefObject<HTMLTextAreaElement | null>) {
         style={{ top: point.top, left: point.left, width: MENU_WIDTH }}
         className="fixed z-50 overflow-hidden rounded-md border bg-popover p-1 font-sans shadow-md"
       >
-        <button
-          type="button"
-          role="option"
-          aria-selected="true"
-          // Keeps the caret where it is instead of blurring on the way in.
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => void run()}
-          className="flex w-full flex-col items-start gap-0.5 rounded-md bg-accent px-3 py-2 text-left transition-colors"
-        >
-          <span className="text-sm text-foreground">{label}</span>
-          <span className="w-full truncate text-xs text-muted-foreground">
-            {note ?? hint}
-          </span>
-        </button>
+        {visible.map((item, i) => (
+          <button
+            key={item.key}
+            type="button"
+            role="option"
+            aria-selected={i === selected}
+            // Keeps the caret where it is instead of blurring on the way in.
+            onMouseDown={(event) => event.preventDefault()}
+            onMouseEnter={() => setCursor(i)}
+            onClick={item.run}
+            className={`flex w-full flex-col items-start gap-0.5 rounded-md px-3 py-2 text-left transition-colors ${
+              i === selected ? "bg-accent" : ""
+            }`}
+          >
+            <span className="text-sm text-foreground">{item.label}</span>
+            <span className="w-full truncate text-xs text-muted-foreground">
+              {item.hint}
+            </span>
+          </button>
+        ))}
       </div>
     ) : null;
 

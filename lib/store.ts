@@ -12,7 +12,8 @@ import {
 } from "@/lib/entries";
 import { DEFAULT_FONT_ID, DEFAULT_FONT_SIZE } from "@/lib/fonts";
 import { clearShareRecord, getShareRecord } from "@/lib/shares";
-import type { Entry } from "@/lib/types";
+import { pruneSketches, putSketch } from "@/lib/sketch";
+import type { Entry, Sketch } from "@/lib/types";
 
 // Preview cycles rather than toggles: writing only, writing beside the
 // rendered text, then the rendered text on its own.
@@ -148,6 +149,8 @@ interface WriterState {
   init: () => Promise<void>;
   reload: () => Promise<void>;
   setContent: (content: string) => void;
+  setSketch: (sketch: Sketch) => void;
+  dropSketch: (id: string) => void;
   addEntry: () => void;
   select: (id: string) => void;
   remove: (id: string) => Promise<void>;
@@ -206,6 +209,34 @@ function flushPending() {
     );
     pendingSave = null;
   }
+}
+
+// Every edit to the open entry goes through here: it stamps updatedAt, lights
+// the save indicator and (re)arms the debounced write, so text and drawings are
+// saved by exactly the same machinery.
+function editCurrent(edit: (entry: Entry) => Entry) {
+  const { entries, currentId } = useWriter.getState();
+  if (!currentId) return;
+  const updated = entries.map((e) =>
+    e.id === currentId ? { ...edit(e), updatedAt: Date.now() } : e
+  );
+  useWriter.setState({ entries: updated, saveState: "saving" });
+  if (savedTimeout) clearTimeout(savedTimeout);
+
+  pendingSave = updated.find((e) => e.id === currentId) ?? null;
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(flushPending, 400);
+}
+
+// Drawings the text no longer points at go when the writer leaves the entry,
+// rather than the moment the reference disappears: cutting one to paste it
+// further down is an ordinary edit, and it mustn't take the drawing with it.
+function pruneCurrent() {
+  const { entries, currentId } = useWriter.getState();
+  const entry = entries.find((e) => e.id === currentId);
+  if (!entry?.sketches?.length) return;
+  const kept = pruneSketches(entry.content, entry.sketches);
+  if (kept !== entry.sketches) editCurrent((e) => ({ ...e, sketches: kept }));
 }
 
 export const useWriter = create<WriterState>()((set, get) => ({
@@ -269,20 +300,27 @@ export const useWriter = create<WriterState>()((set, get) => ({
   },
 
   setContent: (content) => {
-    const { entries, currentId } = get();
-    if (!currentId) return;
-    const updated = entries.map((e) =>
-      e.id === currentId ? { ...e, content, updatedAt: Date.now() } : e
-    );
-    set({ entries: updated, saveState: "saving" });
-    if (savedTimeout) clearTimeout(savedTimeout);
+    editCurrent((e) => ({ ...e, content }));
+  },
 
-    pendingSave = updated.find((e) => e.id === currentId) ?? null;
-    if (saveTimeout) clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(flushPending, 400);
+  // Every finished stroke lands here, so a drawing saves the way typing does
+  // and there is no Done button to forget to press.
+  setSketch: (sketch) => {
+    editCurrent((e) => ({ ...e, sketches: putSketch(e.sketches, sketch) }));
+  },
+
+  // A drawing closed without a mark on it. Its reference goes with it, back in
+  // the editor — nothing is left behind by opening the board and changing your
+  // mind.
+  dropSketch: (id) => {
+    editCurrent((e) => {
+      const kept = e.sketches?.filter((s) => s.id !== id);
+      return { ...e, sketches: kept?.length ? kept : undefined };
+    });
   },
 
   addEntry: () => {
+    pruneCurrent();
     flushPending();
     const fresh = createEntry();
     void putEntry(fresh);
@@ -296,6 +334,7 @@ export const useWriter = create<WriterState>()((set, get) => ({
   },
 
   select: (id) => {
+    pruneCurrent();
     flushPending();
     rememberEntry(id);
     set({ currentId: id });

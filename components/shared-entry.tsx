@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { MarkdownPreview } from "@/components/markdown-preview";
 import { fontById } from "@/lib/fonts";
+import type { Sketch } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 // The read-only page behind a share link. Readers get the same Preview toggle
@@ -14,11 +15,13 @@ export function SharedEntry({
   content,
   fontId,
   fontSize,
+  sketches,
   meta,
 }: {
   content: string;
   fontId: string;
   fontSize: number;
+  sketches?: Sketch[];
   meta: string;
 }) {
   const [preview, setPreview] = useState(false);
@@ -36,6 +39,7 @@ export function SharedEntry({
           content={content}
           fontFamily={font.stack}
           fontSize={fontSize}
+          sketches={sketches}
           className={`${bodyClass} space-y-5`}
         />
       ) : (

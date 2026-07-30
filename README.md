@@ -54,6 +54,18 @@ the song lands in your entry as an ordinary markdown link (`[♫ title · artist
 
 worth knowing: spotify's play history is the last 50 plays and can't be paged past, so "most played today" is counted inside that window. on a quiet day everything has a single play and you get the most recent one.
 
+## whiteboard
+
+typing `/` also offers a whiteboard. it opens full screen — writing and drawing are different states of mind, and drawing wants the room — with seven pens and an eraser from [drawesome](https://benji.org/drawesome). there is nothing to configure and nothing to sign into.
+
+it saves as you draw, one save per stroke, the same as typing does. `Esc` goes back. close it without drawing anything and the entry is exactly as you left it.
+
+the drawing itself is stored on the entry beside its text, and the text keeps a short reference to it (`![sketch](sketch:a3f1)`). strokes are tens of kilobytes of coordinates, which is the one thing that can't sit in the middle of a sentence you're still writing — so the line you see while writing stays a line, and the drawing rides along with the entry through sync and sharing. in Preview it renders as a figure; click it to open the board again. put the caret after a drawing's line and type `/` to reopen that one without Preview on.
+
+a downloaded entry is one markdown file with nowhere to keep a stroke list, so each drawing is embedded as an svg image instead. the file stops being editable as a drawing and starts being readable in anything that renders markdown.
+
+if you sync, apply `db/migrations/0004_entry_sketches.sql` — entries gained a `sketches` column.
+
 ## stack
 
-next.js · tailwind · shadcn/ui · zustand · indexeddb · piper via onnx runtime web (on-device tts) · better auth + supabase (optional sync)
+next.js · tailwind · shadcn/ui · zustand · indexeddb · drawesome (drawing) · piper via onnx runtime web (on-device tts) · better auth + supabase (optional sync)

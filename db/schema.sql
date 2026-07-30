@@ -55,6 +55,7 @@ create table if not exists entries (
   id uuid primary key,
   user_id text not null references "user" (id) on delete cascade,
   content text not null,
+  sketches jsonb,
   created_at bigint not null,
   updated_at bigint not null,
   deleted_at bigint,

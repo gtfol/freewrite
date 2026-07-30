@@ -76,7 +76,7 @@ export async function POST(request: Request) {
 
   const entries = entryIds.length
     ? await pool.query(
-        `select id, content, created_at, updated_at, deleted_at, seq, hash
+        `select id, content, sketches, created_at, updated_at, deleted_at, seq, hash
          from entries where user_id = $1 and id = any($2)`,
         [uid, entryIds]
       )
@@ -96,6 +96,7 @@ export async function POST(request: Request) {
       record: {
         id: r.id,
         content: r.content,
+        ...(r.sketches?.length && { sketches: r.sketches }),
         createdAt: Number(r.created_at),
         updatedAt: Number(r.updated_at),
         deletedAt: r.deleted_at === null ? null : Number(r.deleted_at),

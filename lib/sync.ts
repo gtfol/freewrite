@@ -241,6 +241,9 @@ async function handleResults<T extends Entry | Article>(
         const copy = createEntry(
           `conflicted copy · ${conflictStamp.format(new Date())}\n\n${local.content}`
         );
+        // The copy exists so a local edit isn't lost, and its drawings are part
+        // of that edit — the references it carries would dangle without them.
+        if (local.sketches?.length) copy.sketches = local.sketches;
         await putEntry(copy);
       }
     }

@@ -75,6 +75,7 @@ export function SharePopover() {
       content: entry.content,
       fontId,
       fontSize,
+      sketches: entry.sketches,
       createdAt: entry.createdAt,
     });
 

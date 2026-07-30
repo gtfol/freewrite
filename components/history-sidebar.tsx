@@ -15,12 +15,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { entryDate, entryFilename, entryPreview } from "@/lib/entries";
+import { embedSketches } from "@/lib/sketch-svg";
 import { useWriter } from "@/lib/store";
 import type { Entry } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 function download(entry: Entry) {
-  const blob = new Blob([entry.content], { type: "text/markdown" });
+  const markdown = embedSketches(entry.content, entry.sketches);
+  const blob = new Blob([markdown], { type: "text/markdown" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
