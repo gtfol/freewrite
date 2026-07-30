@@ -1,10 +1,11 @@
-import type { Article, Entry } from "@/lib/types";
+import type { Article, Entry, Sketch } from "@/lib/types";
 
 const DB_NAME = "freewrite";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 const ENTRIES = "entries";
 const ARTICLES = "articles";
+const SKETCHES = "sketches";
 const OUTBOX = "outbox";
 const SYNCMETA = "syncmeta";
 
@@ -18,7 +19,7 @@ export type LocalStore = typeof AUDIO | typeof AUDIOBOOKS;
 
 const TOMBSTONE_TTL = 30 * 24 * 60 * 60 * 1000;
 
-export type Collection = "entries" | "articles";
+export type Collection = "entries" | "articles" | "sketches";
 
 export interface OutboxItem {
   key: string;
@@ -65,6 +66,14 @@ function openDb(): Promise<IDBDatabase> {
           "savedAt",
           "savedAt"
         );
+      }
+      // v5. Drawings used to hang off the entry record; they are their own
+      // record now, resolved by the reference in a text rather than owned by
+      // one entry. Nothing migrates: an entry carrying the old field keeps it
+      // as dead weight until its next write, and the drawing is re-adopted
+      // from it on load.
+      if (!db.objectStoreNames.contains(SKETCHES)) {
+        db.createObjectStore(SKETCHES, { keyPath: "id" });
       }
       if (!db.objectStoreNames.contains(OUTBOX)) {
         db.createObjectStore(OUTBOX, { keyPath: "key" });
@@ -214,6 +223,44 @@ export async function deleteArticle(id: string): Promise<void> {
   await markDirty("articles", id);
 }
 
+function normalizeSketch(s: Sketch): Sketch {
+  return { ...s, deletedAt: s.deletedAt ?? null };
+}
+
+export async function listSketches(): Promise<Sketch[]> {
+  const sketches = await getAll<Sketch>(SKETCHES);
+  return sketches.map(normalizeSketch).filter((s) => !s.deletedAt);
+}
+
+export async function putSketch(sketch: Sketch): Promise<void> {
+  await put(SKETCHES, { ...sketch, updatedAt: Date.now() });
+  await markDirty("sketches", sketch.id);
+}
+
+export async function deleteSketch(id: string): Promise<void> {
+  const current = await get<Sketch>(SKETCHES, id);
+  if (!current || current.deletedAt) return;
+  const now = Date.now();
+  // The strokes go with the tombstone: they are the whole weight of the record,
+  // and nothing reads a deleted drawing.
+  await put(SKETCHES, {
+    ...normalizeSketch(current),
+    strokes: [],
+    updatedAt: now,
+    deletedAt: now,
+  });
+  await markDirty("sketches", id);
+}
+
+export async function getSketchRaw(id: string): Promise<Sketch | undefined> {
+  const sketch = await get<Sketch>(SKETCHES, id);
+  return sketch ? normalizeSketch(sketch) : undefined;
+}
+
+export async function listSketchesRaw(): Promise<Sketch[]> {
+  return (await getAll<Sketch>(SKETCHES)).map(normalizeSketch);
+}
+
 export async function getEntryRaw(id: string): Promise<Entry | undefined> {
   const entry = await get<Entry>(ENTRIES, id);
   return entry ? normalizeEntry(entry) : undefined;
@@ -234,6 +281,7 @@ export async function listArticlesRaw(): Promise<Article[]> {
 
 export const applyRemoteEntry = (entry: Entry) => put(ENTRIES, entry);
 export const applyRemoteArticle = (article: Article) => put(ARTICLES, article);
+export const applyRemoteSketch = (sketch: Sketch) => put(SKETCHES, sketch);
 
 export const listOutbox = () => getAll<OutboxItem>(OUTBOX);
 export const clearOutboxItem = (key: string) => hardDelete(OUTBOX, key);
@@ -287,6 +335,11 @@ export async function purgeTombstones(): Promise<void> {
   for (const a of await getAll<Article>(ARTICLES)) {
     if (a.deletedAt && a.deletedAt < cutoff && !dirty.has(`articles:${a.id}`)) {
       await hardDelete(ARTICLES, a.id);
+    }
+  }
+  for (const s of await getAll<Sketch>(SKETCHES)) {
+    if (s.deletedAt && s.deletedAt < cutoff && !dirty.has(`sketches:${s.id}`)) {
+      await hardDelete(SKETCHES, s.id);
     }
   }
 }

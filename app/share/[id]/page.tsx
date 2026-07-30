@@ -80,6 +80,7 @@ export default async function SharedEntryPage({
       content={share.content}
       fontId={share.fontId}
       fontSize={share.fontSize}
+      sketches={share.sketches}
       meta={meta}
     />
   );

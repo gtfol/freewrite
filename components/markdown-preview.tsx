@@ -6,7 +6,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { JsonTree } from "@/components/json-tree";
 import { Lightbox, type LightboxMedia } from "@/components/lightbox";
+import { BOARD, sketchIdFrom } from "@/lib/sketch";
+import { sketchDataUri, sketchView } from "@/lib/sketch-svg";
 import { embedUrl, splitLabel, trackIdFrom } from "@/lib/spotify";
+import type { Sketch } from "@/lib/types";
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -84,6 +87,17 @@ function spotifyChip(id: string, text: string): string {
   );
 }
 
+// A drawing is an empty frame until the effect below fills it: the strokes live
+// on the entry record, not in the markdown, and this renderer only ever sees
+// the reference. Sized from the board so the column doesn't reflow once the
+// picture arrives.
+function sketchFrame(id: string, ratio: number): string {
+  return (
+    `<span class="sketch-figure" data-sketch="${escapeAttr(id)}"` +
+    ` style="aspect-ratio:${ratio}" role="button" tabindex="0"></span>`
+  );
+}
+
 // The compact player. Once it's in, it stays in.
 function spotifyEmbed(id: string): string {
   return (
@@ -127,14 +141,19 @@ const marked = new Marked({
     // labeled link precisely so the raw text stays readable while you write,
     // so a label can't be what disqualifies it from embedding.
     link({ href, text }) {
+      const sketch = sketchIdFrom(href);
+      if (sketch) return sketchFrame(sketch, BOARD.w / BOARD.h);
       const track = trackIdFrom(href);
       if (track) return spotifyChip(track, text === href ? "" : text);
       if (text !== href) return false;
       const media = mediaFor(href);
       return media ? mediaHtml(media) : false;
     },
-    // ![](movie.mp4) — image syntax pointing at a video renders a player.
+    // ![](movie.mp4) — image syntax pointing at a video renders a player, and
+    // ![sketch](sketch:a3f1) — what the / command writes — renders a drawing.
     image({ href }) {
+      const sketch = sketchIdFrom(href);
+      if (sketch) return sketchFrame(sketch, BOARD.w / BOARD.h);
       const media = mediaFor(href);
       return media && media.tag !== "image" ? mediaHtml(media) : false;
     },
@@ -253,11 +272,19 @@ export function MarkdownPreview({
   content,
   fontFamily,
   fontSize,
+  sketches,
+  onEditSketch,
   className = "mx-auto max-w-[650px] space-y-5 px-6 pt-14 pb-28",
 }: {
   content: string;
   fontFamily: string;
   fontSize: number;
+  // The drawings the content references. A reader on a shared page gets them
+  // too, which is why they arrive as a prop rather than off the store.
+  sketches?: Sketch[];
+  // Set in the writer, where clicking a drawing reopens the board. A shared
+  // page leaves it out and clicking zooms instead — there is nothing to edit.
+  onEditSketch?: (id: string) => void;
   // The writer's side-by-side pane owns its own padding; a shared entry sits
   // under its meta line and needs a different one.
   className?: string;
@@ -265,6 +292,36 @@ export function MarkdownPreview({
   const segments = useMemo(() => segment(content), [content]);
   const [zoomed, setZoomed] = useState<LightboxMedia | null>(null);
   const root = useRef<HTMLDivElement>(null);
+
+  // Serializing is the expensive part, so it happens once per change to the
+  // drawings rather than once per keystroke in the side-by-side pane.
+  const svgById = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof sketchView>>();
+    for (const s of sketches ?? []) map.set(s.id, sketchView(s));
+    return map;
+  }, [sketches]);
+
+  const filledFrom = useRef<typeof svgById | null>(null);
+
+  // Editing the entry re-injects the markdown and takes the drawings with it,
+  // so the frames are refilled after every render — the same arrangement the
+  // player swap below uses. Skipped when neither the nodes nor the drawings are
+  // new, which is most renders.
+  useEffect(() => {
+    const nodes = root.current?.querySelectorAll<HTMLElement>("[data-sketch]");
+    for (const node of nodes ?? []) {
+      if (filledFrom.current === svgById && node.firstElementChild) continue;
+      const drawing = svgById.get(node.dataset.sketch ?? "");
+      // The strokes are numbers, an enum and hex colours — nothing free-form
+      // reaches this markup, which is what makes serialized SVG safe to inject.
+      node.innerHTML = drawing?.svg ?? "";
+      if (drawing) node.style.aspectRatio = String(drawing.ratio);
+      // A reference whose drawing is missing says so rather than sitting as a
+      // blank gap: it means the strokes haven't synced down yet, or won't.
+      node.classList.toggle("sketch-missing", !drawing);
+    }
+    filledFrom.current = svgById;
+  });
 
   // Editing the entry re-injects the markdown and takes any open player with
   // it, so the swap is re-applied after every render. What a player can't
@@ -291,6 +348,21 @@ export function MarkdownPreview({
     return true;
   }, []);
 
+  // Clicking a drawing reopens the board in the writer. On a shared page there
+  // is nothing to reopen, so it zooms like any other picture.
+  const drawFrom = useCallback(
+    (target: EventTarget | null): boolean => {
+      if (!(target instanceof Element)) return false;
+      const id = target.closest<HTMLElement>("[data-sketch]")?.dataset.sketch;
+      const drawing = sketches?.find((s) => s.id === id);
+      if (!id || !drawing) return false;
+      if (onEditSketch) onEditSketch(id);
+      else setZoomed({ kind: "image", src: sketchDataUri(drawing) });
+      return true;
+    },
+    [sketches, onEditSketch]
+  );
+
   // The rendered markdown is injected HTML, so media clicks are caught by
   // delegation rather than per-element handlers.
   const openFrom = useCallback((target: EventTarget | null): boolean => {
@@ -316,11 +388,15 @@ export function MarkdownPreview({
       <div
         ref={root}
         onClick={(e) => {
-          if (playFrom(e.target) || openFrom(e.target)) e.preventDefault();
+          if (drawFrom(e.target) || playFrom(e.target) || openFrom(e.target)) {
+            e.preventDefault();
+          }
         }}
         onKeyDown={(e) => {
           if (e.key !== "Enter" && e.key !== " ") return;
-          if (playFrom(e.target) || openFrom(e.target)) e.preventDefault();
+          if (drawFrom(e.target) || playFrom(e.target) || openFrom(e.target)) {
+            e.preventDefault();
+          }
         }}
         className={className}
       >

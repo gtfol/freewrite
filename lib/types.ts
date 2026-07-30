@@ -1,3 +1,40 @@
+import type { Stroke } from "drawesome";
+
+/**
+ * A drawing made with the / command. Strokes are drawesome's own plain data;
+ * the board they were sampled against travels with them, because a point only
+ * means anything relative to it.
+ *
+ * A record of its own rather than a field on the entry, and resolved by the
+ * reference in a text — ![sketch](sketch:a3f1) — wherever that reference ends
+ * up. That is what lets a drawing be copied from one entry to another, and it
+ * means a drawing's life doesn't hang on the text saying so at this instant:
+ * delete the reference while you rewrite the paragraph around it and the
+ * drawing is still here when you put it back.
+ */
+export interface Sketch {
+  id: string;
+  w: number;
+  h: number;
+  /** Paper colour, kept with the drawing so it renders the same everywhere. */
+  bg: string;
+  strokes: Stroke[];
+  updatedAt: number;
+  /**
+   * When this drawing was first noticed with nothing pointing at it. Set by the
+   * sweep, cleared if a reference comes back, and the clock the grace period is
+   * measured from — a drawing is only collected once it has been unclaimed for
+   * that long, so deleting a reference while rewriting the text around it can't
+   * take the drawing with it.
+   *
+   * Deliberately outside the hash: it's this device's bookkeeping, not part of
+   * the drawing, so noticing an orphan doesn't push a record or disagree with
+   * another device that hasn't noticed yet.
+   */
+  orphanedAt?: number | null;
+  deletedAt?: number | null;
+}
+
 export interface Entry {
   id: string;
   createdAt: number;
@@ -74,6 +111,7 @@ export interface SyncCollectionResult<T> {
 export interface SyncResponse {
   entries: SyncCollectionResult<Entry>;
   articles: SyncCollectionResult<Article>;
+  sketches: SyncCollectionResult<Sketch>;
 }
 
 export interface ManifestItem {
@@ -85,11 +123,13 @@ export interface ManifestItem {
 export interface SyncManifest {
   entries: ManifestItem[];
   articles: ManifestItem[];
+  sketches: ManifestItem[];
 }
 
 export interface SyncDigest {
   entries: { digest: string; count: number };
   articles: { digest: string; count: number };
+  sketches: { digest: string; count: number };
 }
 
 export interface ExtractedArticle {

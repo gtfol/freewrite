@@ -404,6 +404,61 @@
   }
 }
 
+/* A drawing. Outside .preview because a shared entry renders these too, and a
+   whiteboard is the same figure in both places. It sits on its own line and
+   fills the column: a sketch is the point of the line it's on, not an aside. */
+.sketch-figure {
+  display: block;
+  width: 100%;
+  margin-block: 0.5em;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  /* Reserved from the board's proportions before the picture is filled in, so
+     the column doesn't jump once it arrives. */
+  aspect-ratio: 1.6;
+  line-height: 0;
+  cursor: pointer;
+  transition: opacity 150ms;
+}
+
+.sketch-figure:hover,
+.sketch-figure:focus-visible {
+  opacity: 0.85;
+}
+
+.sketch-figure > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* A reference whose drawing isn't here — it hasn't synced down yet, or the
+   share it came from didn't carry it. An empty frame that says so beats a
+   silent gap in the middle of the writing. */
+.sketch-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: auto;
+  min-height: 4em;
+  border-style: dashed;
+  cursor: default;
+  font-family: var(--font-sans);
+  font-size: 0.8em;
+  line-height: 1.4;
+  color: var(--color-muted-foreground);
+}
+
+.sketch-missing::after {
+  content: "drawing not available";
+}
+
+.sketch-missing:hover,
+.sketch-missing:focus-visible {
+  opacity: 1;
+}
+
 /* A Spotify track, before and after it's been asked for. Outside .preview
    because a shared entry renders these too, and they're the same size there —
    unlike an image, whose whole job changes between the two. */

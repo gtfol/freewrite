@@ -24,9 +24,10 @@ export async function GET(request: Request) {
   const full = new URL(request.url).searchParams.get("full") === "1";
   const pool = getPool();
 
-  const [entries, articles] = await Promise.all([
+  const [entries, articles, sketches] = await Promise.all([
     pool.query(`select id, hash, seq from entries where user_id = $1`, [uid]),
     pool.query(`select id, hash, seq from articles where user_id = $1`, [uid]),
+    pool.query(`select id, hash, seq from sketches where user_id = $1`, [uid]),
   ]);
 
   if (full) {
@@ -38,6 +39,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       entries: entries.rows.map(toItem),
       articles: articles.rows.map(toItem),
+      sketches: sketches.rows.map(toItem),
     });
   }
 
@@ -50,6 +52,10 @@ export async function GET(request: Request) {
       digest: await rootDigest(articles.rows),
       count: articles.rowCount ?? 0,
     },
+    sketches: {
+      digest: await rootDigest(sketches.rows),
+      count: sketches.rowCount ?? 0,
+    },
   });
 }
 
@@ -58,7 +64,7 @@ export async function POST(request: Request) {
   const uid = await requireUser(request);
   if (!uid) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
 
-  let body: { entries?: unknown; articles?: unknown };
+  let body: { entries?: unknown; articles?: unknown; sketches?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -73,12 +79,20 @@ export async function POST(request: Request) {
   const pool = getPool();
   const entryIds = ids(body.entries);
   const articleIds = ids(body.articles);
+  const sketchIds = ids(body.sketches);
 
   const entries = entryIds.length
     ? await pool.query(
         `select id, content, created_at, updated_at, deleted_at, seq, hash
          from entries where user_id = $1 and id = any($2)`,
         [uid, entryIds]
+      )
+    : { rows: [] };
+  const sketches = sketchIds.length
+    ? await pool.query(
+        `select id, w, h, bg, strokes, updated_at, deleted_at, seq, hash
+         from sketches where user_id = $1 and id = any($2)`,
+        [uid, sketchIds]
       )
     : { rows: [] };
   const articles = articleIds.length
@@ -97,6 +111,19 @@ export async function POST(request: Request) {
         id: r.id,
         content: r.content,
         createdAt: Number(r.created_at),
+        updatedAt: Number(r.updated_at),
+        deletedAt: r.deleted_at === null ? null : Number(r.deleted_at),
+      },
+      rev: Number(r.seq),
+      hash: r.hash,
+    })),
+    sketches: sketches.rows.map((r) => ({
+      record: {
+        id: r.id,
+        w: r.w,
+        h: r.h,
+        bg: r.bg,
+        strokes: r.strokes ?? [],
         updatedAt: Number(r.updated_at),
         deletedAt: r.deleted_at === null ? null : Number(r.deleted_at),
       },

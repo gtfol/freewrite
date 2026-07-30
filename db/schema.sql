@@ -84,3 +84,17 @@ create table if not exists articles (
   hash text not null default ''
 );
 create index if not exists articles_user_seq on articles (user_id, seq);
+
+create table if not exists sketches (
+  id text primary key,
+  user_id text not null references "user" (id) on delete cascade,
+  w integer not null,
+  h integer not null,
+  bg text not null,
+  strokes jsonb not null,
+  updated_at bigint not null,
+  deleted_at bigint,
+  seq bigint not null default nextval('sync_seq'),
+  hash text not null default ''
+);
+create index if not exists sketches_user_seq on sketches (user_id, seq);

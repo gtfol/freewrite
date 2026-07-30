@@ -3,11 +3,13 @@ import type { PoolClient } from "pg";
 
 import { getAuth } from "@/lib/server/auth";
 import { getPool } from "@/lib/server/db";
+import { parseSketch } from "@/lib/sketch";
 import type {
   Article,
   Entry,
   Highlight,
   PushOutcome,
+  Sketch,
   SyncChange,
   SyncCollectionResult,
   SyncRow,
@@ -148,6 +150,18 @@ function asArticle(v: unknown): Article | null {
   };
 }
 
+interface SketchRowShape {
+  id: string;
+  w: number;
+  h: number;
+  bg: string;
+  strokes: Sketch["strokes"];
+  updated_at: unknown;
+  deleted_at: unknown;
+  seq: unknown;
+  hash: string;
+}
+
 function parseChanges<T>(
   v: unknown,
   parse: (item: unknown) => T | null
@@ -243,12 +257,32 @@ function articleRow(r: ArticleRowShape): SyncRow<Article> {
   };
 }
 
+function sketchRow(r: SketchRowShape): SyncRow<Sketch> {
+  return {
+    record: {
+      id: r.id,
+      w: r.w,
+      h: r.h,
+      bg: r.bg,
+      strokes: r.strokes ?? [],
+      updatedAt: num(r.updated_at),
+      deletedAt: numOrNull(r.deleted_at),
+    },
+    rev: num(r.seq),
+    hash: r.hash,
+  };
+}
+
 // jsonb params must be stringified: node-pg serializes a bare JS array as a
 // postgres array literal, not json.
 const highlightsParam = (a: Article): string | null =>
   a.highlights?.length ? JSON.stringify(a.highlights) : null;
 
+const strokesParam = (s: Sketch): string => JSON.stringify(s.strokes);
+
 const ENTRY_COLS = "id, content, created_at, updated_at, deleted_at, seq, hash";
+const SKETCH_COLS =
+  "id, w, h, bg, strokes, updated_at, deleted_at, seq, hash";
 const ARTICLE_COLS =
   "id, url, title, byline, site_name, excerpt, content, content_original, word_count, saved_at, read_at, via, highlights, updated_at, deleted_at, seq, hash";
 
@@ -376,9 +410,68 @@ async function pushArticle(
   return { id: a.id, status: "conflict", server: articleRow(rows[0] as ArticleRowShape) };
 }
 
+async function pushSketch(
+  client: PoolClient,
+  uid: string,
+  change: SyncChange<Sketch>
+): Promise<PushOutcome<Sketch>> {
+  const s = change.record;
+
+  const inserted = await client.query(
+    `insert into sketches (id, user_id, w, h, bg, strokes, updated_at, deleted_at, hash)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     on conflict (id) do nothing
+     returning seq`,
+    [s.id, uid, s.w, s.h, s.bg, strokesParam(s), s.updatedAt, s.deletedAt, change.hash]
+  );
+  if (inserted.rowCount) {
+    return { id: s.id, status: "ok", rev: num(inserted.rows[0].seq), hash: change.hash };
+  }
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { rows } = await client.query(
+      `select ${SKETCH_COLS} from sketches where id = $1 and user_id = $2`,
+      [s.id, uid]
+    );
+    if (!rows.length) {
+      // A drawing id is six characters, so unlike an entry's uuid this can
+      // realistically collide with another account's. Report the client's own
+      // state so it stops retrying, and write nothing.
+      return { id: s.id, status: "ok", rev: change.baseRev, hash: change.hash };
+    }
+    const current = rows[0] as SketchRowShape;
+    if (current.hash === change.hash) {
+      return { id: s.id, status: "ok", rev: num(current.seq), hash: current.hash };
+    }
+    if (num(current.seq) === change.baseRev || current.hash === "") {
+      const updated = await client.query(
+        `update sketches set w = $3, h = $4, bg = $5, strokes = $6,
+           updated_at = $7, deleted_at = $8, hash = $9, seq = nextval('sync_seq')
+         where id = $1 and user_id = $2 and seq = $10
+         returning seq`,
+        [
+          s.id, uid, s.w, s.h, s.bg, strokesParam(s), s.updatedAt, s.deletedAt,
+          change.hash, current.seq,
+        ]
+      );
+      if (updated.rowCount) {
+        return { id: s.id, status: "ok", rev: num(updated.rows[0].seq), hash: change.hash };
+      }
+      continue; // raced with another device — re-read and re-decide once
+    }
+    return { id: s.id, status: "conflict", server: sketchRow(current) };
+  }
+
+  const { rows } = await client.query(
+    `select ${SKETCH_COLS} from sketches where id = $1 and user_id = $2`,
+    [s.id, uid]
+  );
+  return { id: s.id, status: "conflict", server: sketchRow(rows[0] as SketchRowShape) };
+}
+
 async function pull<T>(
   client: PoolClient,
-  table: "entries" | "articles",
+  table: "entries" | "articles" | "sketches",
   cols: string,
   toRow: (r: never) => SyncRow<T>,
   uid: string,
@@ -422,19 +515,24 @@ export async function POST(request: Request) {
 
   const entries = parseChanges(body.entries, asEntry);
   const articles = parseChanges(body.articles, asArticle);
+  const sketches = parseChanges(body.sketches, parseSketch);
 
   const client = await getPool().connect();
   try {
     const entryResults: PushOutcome<Entry>[] = [];
     const articleResults: PushOutcome<Article>[] = [];
+    const sketchResults: PushOutcome<Sketch>[] = [];
 
-    if (entries.changes.length || articles.changes.length) {
+    if (entries.changes.length || articles.changes.length || sketches.changes.length) {
       await client.query("begin");
       for (const change of entries.changes) {
         entryResults.push(await pushEntry(client, uid, change));
       }
       for (const change of articles.changes) {
         articleResults.push(await pushArticle(client, uid, change));
+      }
+      for (const change of sketches.changes) {
+        sketchResults.push(await pushSketch(client, uid, change));
       }
       await client.query("commit");
     }
@@ -445,13 +543,18 @@ export async function POST(request: Request) {
     const articlePull = await pull<Article>(
       client, "articles", ARTICLE_COLS, articleRow as never, uid, articles.since
     );
+    const sketchPull = await pull<Sketch>(
+      client, "sketches", SKETCH_COLS, sketchRow as never, uid, sketches.since
+    );
 
     const response: {
       entries: SyncCollectionResult<Entry>;
       articles: SyncCollectionResult<Article>;
+      sketches: SyncCollectionResult<Sketch>;
     } = {
       entries: { results: entryResults, ...entryPull },
       articles: { results: articleResults, ...articlePull },
+      sketches: { results: sketchResults, ...sketchPull },
     };
     return NextResponse.json(response);
   } catch (error) {

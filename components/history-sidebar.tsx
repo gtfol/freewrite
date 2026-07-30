@@ -15,12 +15,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { entryDate, entryFilename, entryPreview } from "@/lib/entries";
+import { embedSketches } from "@/lib/sketch-svg";
 import { useWriter } from "@/lib/store";
-import type { Entry } from "@/lib/types";
+import type { Entry, Sketch } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-function download(entry: Entry) {
-  const blob = new Blob([entry.content], { type: "text/markdown" });
+function download(entry: Entry, sketches: Sketch[]) {
+  const markdown = embedSketches(entry.content, sketches);
+  const blob = new Blob([markdown], { type: "text/markdown" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -31,6 +33,9 @@ function download(entry: Entry) {
 
 export function HistorySidebar() {
   const entries = useWriter((s) => s.entries);
+  // Every drawing, not the open entry's: which ones a download needs is decided
+  // by the references in the entry being downloaded.
+  const sketches = useWriter((s) => s.sketches);
   const currentId = useWriter((s) => s.currentId);
   const open = useWriter((s) => s.sidebarOpen);
   const setOpen = useWriter((s) => s.setSidebarOpen);
@@ -93,7 +98,7 @@ export function HistorySidebar() {
                   <span className="absolute top-1/2 right-2 hidden -translate-y-1/2 items-center gap-1.5 group-hover:flex">
                     <button
                       type="button"
-                      onClick={() => download(entry)}
+                      onClick={() => download(entry, sketches)}
                       title="Download as markdown"
                       className="text-muted-foreground transition-colors hover:text-foreground"
                     >

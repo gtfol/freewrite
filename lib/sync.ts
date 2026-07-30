@@ -6,14 +6,17 @@ import { authClient } from "@/lib/auth-client";
 import {
   applyRemoteArticle,
   applyRemoteEntry,
+  applyRemoteSketch,
   clearOutboxItem,
   enqueueOutbox,
   getArticleRaw,
   getEntryRaw,
+  getSketchRaw,
   getSyncMeta,
   listArticlesRaw,
   listEntriesRaw,
   listOutbox,
+  listSketchesRaw,
   listSyncMeta,
   putEntry,
   putSyncMeta,
@@ -21,13 +24,14 @@ import {
   type Collection,
 } from "@/lib/db";
 import { createEntry, WELCOME_CONTENT } from "@/lib/entries";
-import { articleHash, entryHash, rootDigest } from "@/lib/hash";
+import { articleHash, entryHash, rootDigest, sketchHash } from "@/lib/hash";
 import { useSpotify } from "@/lib/spotify-connect";
 import { useWriter } from "@/lib/store";
 import type {
   Article,
   Entry,
   ManifestItem,
+  Sketch,
   SyncChange,
   SyncDigest,
   SyncManifest,
@@ -47,21 +51,24 @@ const MAX_ROUNDS = 20;
 
 export const SYNC_APPLIED_EVENT = "freewrite:sync-applied";
 
-interface Cursors {
-  entries: number;
-  articles: number;
-}
+const COLLECTIONS = ["entries", "articles", "sketches"] as const;
+
+type Cursors = Record<Collection, number>;
 
 function loadCursors(userId: string): Cursors {
   try {
     const stored = JSON.parse(localStorage.getItem(CURSORS_KEY) ?? "");
     if (stored?.userId === userId) {
-      return { entries: stored.entries ?? 0, articles: stored.articles ?? 0 };
+      return {
+        entries: stored.entries ?? 0,
+        articles: stored.articles ?? 0,
+        sketches: stored.sketches ?? 0,
+      };
     }
   } catch {
     // fresh cursors
   }
-  return { entries: 0, articles: 0 };
+  return { entries: 0, articles: 0, sketches: 0 };
 }
 
 function saveCursors(userId: string, cursors: Cursors) {
@@ -115,25 +122,30 @@ let inFlight = false;
 let queued = false;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+type AnyRecord = Entry | Article | Sketch;
+
 async function recordHash(
   collection: Collection,
-  record: Entry | Article
+  record: AnyRecord
 ): Promise<string> {
-  return collection === "entries"
-    ? entryHash(record as Entry)
-    : articleHash(record as Article);
+  if (collection === "entries") return entryHash(record as Entry);
+  if (collection === "articles") return articleHash(record as Article);
+  return sketchHash(record as Sketch);
 }
 
 async function getRaw(
   collection: Collection,
   id: string
-): Promise<Entry | Article | undefined> {
-  return collection === "entries" ? getEntryRaw(id) : getArticleRaw(id);
+): Promise<AnyRecord | undefined> {
+  if (collection === "entries") return getEntryRaw(id);
+  if (collection === "articles") return getArticleRaw(id);
+  return getSketchRaw(id);
 }
 
-async function applyRemote(collection: Collection, record: Entry | Article) {
+async function applyRemote(collection: Collection, record: AnyRecord) {
   if (collection === "entries") await applyRemoteEntry(record as Entry);
-  else await applyRemoteArticle(record as Article);
+  else if (collection === "articles") await applyRemoteArticle(record as Article);
+  else await applyRemoteSketch(record as Sketch);
 }
 
 // Server rows are authoritative for records with no local edits in flight.
@@ -142,7 +154,7 @@ async function applyRemote(collection: Collection, record: Entry | Article) {
 // silently overwriting the concurrent change instead of surfacing a conflict.
 async function applyPulledRow(
   collection: Collection,
-  row: SyncRow<Entry> | SyncRow<Article>,
+  row: SyncRow<AnyRecord>,
   dirtyKeys: Set<string>
 ): Promise<boolean> {
   const key = `${collection}:${row.record.id}`;
@@ -172,7 +184,7 @@ interface PushItem<T> {
   snapshotUpdatedAt: number;
 }
 
-async function buildPushBatch<T extends Entry | Article>(
+async function buildPushBatch<T extends AnyRecord>(
   collection: Collection,
   outboxKeys: string[]
 ): Promise<PushItem<T>[]> {
@@ -204,10 +216,10 @@ async function buildPushBatch<T extends Entry | Article>(
   return items;
 }
 
-async function handleResults<T extends Entry | Article>(
+async function handleResults<T extends AnyRecord>(
   collection: Collection,
   items: PushItem<T>[],
-  results: SyncResponse["entries"]["results"] | SyncResponse["articles"]["results"]
+  results: SyncResponse[Collection]["results"]
 ): Promise<boolean> {
   let applied = false;
   const byId = new Map(items.map((i) => [i.change.record.id, i]));
@@ -241,6 +253,8 @@ async function handleResults<T extends Entry | Article>(
         const copy = createEntry(
           `conflicted copy · ${conflictStamp.format(new Date())}\n\n${local.content}`
         );
+        // The copy's references resolve to the same drawings the original's
+        // did — nothing to carry, because a drawing isn't owned by an entry.
         await putEntry(copy);
       }
     }
@@ -256,28 +270,28 @@ async function handleResults<T extends Entry | Article>(
   return applied;
 }
 
-async function fetchRows(ids: {
-  entries: string[];
-  articles: string[];
-}): Promise<{ entries: SyncRow<Entry>[]; articles: SyncRow<Article>[] }> {
-  const out = { entries: [] as SyncRow<Entry>[], articles: [] as SyncRow<Article>[] };
-  let e = 0;
-  let a = 0;
-  while (e < ids.entries.length || a < ids.articles.length) {
+type Needed = Record<Collection, string[]>;
+type FetchedRows = Record<Collection, SyncRow<AnyRecord>[]>;
+
+async function fetchRows(ids: Needed): Promise<FetchedRows> {
+  const out: FetchedRows = { entries: [], articles: [], sketches: [] };
+  const taken: Cursors = { entries: 0, articles: 0, sketches: 0 };
+  while (COLLECTIONS.some((c) => taken[c] < ids[c].length)) {
     const res = await fetch("/api/sync/manifest", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        entries: ids.entries.slice(e, e + FETCH_BATCH),
-        articles: ids.articles.slice(a, a + FETCH_BATCH),
-      }),
+      body: JSON.stringify(
+        Object.fromEntries(
+          COLLECTIONS.map((c) => [c, ids[c].slice(taken[c], taken[c] + FETCH_BATCH)])
+        )
+      ),
     });
     if (!res.ok) throw new Error(`Sync failed (${res.status})`);
     const body = await res.json();
-    out.entries.push(...body.entries);
-    out.articles.push(...body.articles);
-    e += FETCH_BATCH;
-    a += FETCH_BATCH;
+    for (const c of COLLECTIONS) {
+      out[c].push(...(body[c] ?? []));
+      taken[c] += FETCH_BATCH;
+    }
   }
   return out;
 }
@@ -292,11 +306,11 @@ async function reconcile(user: SyncUser): Promise<boolean> {
   const metaMap = new Map((await listSyncMeta()).map((m) => [m.key, m]));
   const outboxKeys = new Set((await listOutbox()).map((o) => o.key));
 
-  async function localPairs<T extends Entry | Article>(
+  async function localPairs(
     collection: Collection,
-    records: T[]
-  ): Promise<Map<string, { record: T; hash: string }>> {
-    const map = new Map<string, { record: T; hash: string }>();
+    records: AnyRecord[]
+  ): Promise<Map<string, { hash: string }>> {
+    const map = new Map<string, { hash: string }>();
     for (const record of records) {
       const key = `${collection}:${record.id}`;
       if (
@@ -306,14 +320,15 @@ async function reconcile(user: SyncUser): Promise<boolean> {
       ) {
         continue;
       }
-      map.set(record.id, { record, hash: await recordHash(collection, record) });
+      map.set(record.id, { hash: await recordHash(collection, record) });
     }
     return map;
   }
 
-  const local = {
+  const local: Record<Collection, Map<string, { hash: string }>> = {
     entries: await localPairs("entries", await listEntriesRaw()),
     articles: await localPairs("articles", await listArticlesRaw()),
+    sketches: await localPairs("sketches", await listSketchesRaw()),
   };
 
   const digestRes = await fetch("/api/sync/manifest");
@@ -323,23 +338,26 @@ async function reconcile(user: SyncUser): Promise<boolean> {
   const localDigest = async (map: Map<string, { hash: string }>) =>
     rootDigest([...map.entries()].map(([id, v]) => ({ id, hash: v.hash })));
 
-  if (
-    (await localDigest(local.entries)) === digests.entries.digest &&
-    (await localDigest(local.articles)) === digests.articles.digest
-  ) {
-    return false;
+  let aligned = true;
+  for (const collection of COLLECTIONS) {
+    // A server that predates the sketches collection reports nothing for it;
+    // treat that as aligned rather than as every drawing being missing.
+    const digest = digests[collection]?.digest;
+    if (digest === undefined) continue;
+    if ((await localDigest(local[collection])) !== digest) aligned = false;
   }
+  if (aligned) return false;
 
   const manifestRes = await fetch("/api/sync/manifest?full=1");
   if (!manifestRes.ok) throw new Error(`Sync failed (${manifestRes.status})`);
   const manifest: SyncManifest = await manifestRes.json();
 
-  const need = { entries: [] as string[], articles: [] as string[] };
+  const need: Needed = { entries: [], articles: [], sketches: [] };
   let applied = false;
 
-  for (const collection of ["entries", "articles"] as const) {
+  for (const collection of COLLECTIONS) {
     const serverItems = new Map<string, ManifestItem>(
-      manifest[collection].map((m) => [m.id, m])
+      (manifest[collection] ?? []).map((m) => [m.id, m])
     );
     const localMap = local[collection];
 
@@ -375,13 +393,12 @@ async function reconcile(user: SyncUser): Promise<boolean> {
     }
   }
 
-  if (need.entries.length || need.articles.length) {
+  if (COLLECTIONS.some((c) => need[c].length)) {
     const rows = await fetchRows(need);
-    for (const row of rows.entries) {
-      if (await applyPulledRow("entries", row, outboxKeys)) applied = true;
-    }
-    for (const row of rows.articles) {
-      if (await applyPulledRow("articles", row, outboxKeys)) applied = true;
+    for (const collection of COLLECTIONS) {
+      for (const row of rows[collection]) {
+        if (await applyPulledRow(collection, row, outboxKeys)) applied = true;
+      }
     }
   }
 
@@ -472,28 +489,25 @@ export const useSync = create<SyncState>()((set, get) => ({
 
       for (let round = 0; round < MAX_ROUNDS; round++) {
         const outbox = await listOutbox();
-        const entryItems = await buildPushBatch<Entry>(
-          "entries",
-          outbox.filter((o) => o.collection === "entries").map((o) => o.key)
-        );
-        const articleItems = await buildPushBatch<Article>(
-          "articles",
-          outbox.filter((o) => o.collection === "articles").map((o) => o.key)
-        );
+        const batches = {} as Record<Collection, PushItem<AnyRecord>[]>;
+        for (const collection of COLLECTIONS) {
+          batches[collection] = await buildPushBatch<AnyRecord>(
+            collection,
+            outbox.filter((o) => o.collection === collection).map((o) => o.key)
+          );
+        }
 
         const res = await fetch("/api/sync", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            entries: {
-              since: cursors.entries,
-              changes: entryItems.map((i) => i.change),
-            },
-            articles: {
-              since: cursors.articles,
-              changes: articleItems.map((i) => i.change),
-            },
-          }),
+          body: JSON.stringify(
+            Object.fromEntries(
+              COLLECTIONS.map((c) => [
+                c,
+                { since: cursors[c], changes: batches[c].map((i) => i.change) },
+              ])
+            )
+          ),
         });
         if (res.status === 401) {
           set({ user: null, status: "signed-out" });
@@ -502,28 +516,32 @@ export const useSync = create<SyncState>()((set, get) => ({
         if (!res.ok) throw new Error(`Sync failed (${res.status})`);
         const data: SyncResponse = await res.json();
 
-        if (await handleResults("entries", entryItems, data.entries.results)) {
-          applied = true;
-        }
-        if (await handleResults("articles", articleItems, data.articles.results)) {
-          applied = true;
+        // A server that predates the sketches collection answers without one.
+        // Treat it as an empty round for that collection: the drawings stay
+        // queued, and nothing about the entries stalls waiting for them.
+        const empty = { results: [], rows: [], cursor: 0, hasMore: false };
+        const part = (c: Collection) => data[c] ?? { ...empty, cursor: cursors[c] };
+
+        for (const collection of COLLECTIONS) {
+          if (await handleResults(collection, batches[collection], part(collection).results)) {
+            applied = true;
+          }
         }
 
         const dirtyKeys = new Set((await listOutbox()).map((o) => o.key));
-        for (const row of data.entries.rows) {
-          if (await applyPulledRow("entries", row, dirtyKeys)) applied = true;
-        }
-        for (const row of data.articles.rows) {
-          if (await applyPulledRow("articles", row, dirtyKeys)) applied = true;
+        for (const collection of COLLECTIONS) {
+          for (const row of part(collection).rows) {
+            if (await applyPulledRow(collection, row, dirtyKeys)) applied = true;
+          }
         }
 
-        cursors = { entries: data.entries.cursor, articles: data.articles.cursor };
+        cursors = Object.fromEntries(
+          COLLECTIONS.map((c) => [c, part(c).cursor])
+        ) as Cursors;
         saveCursors(user.id, cursors);
 
         const outboxDrained = (await listOutbox()).length === 0;
-        if (!data.entries.hasMore && !data.articles.hasMore && outboxDrained) {
-          break;
-        }
+        if (!COLLECTIONS.some((c) => part(c).hasMore) && outboxDrained) break;
       }
 
       if (applied) {
