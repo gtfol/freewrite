@@ -80,6 +80,7 @@ export function Editor() {
   const entry = useWriter(currentEntry);
   const placeholder = useWriter((s) => s.placeholder);
   const setContent = useWriter((s) => s.setContent);
+  const sketches = useWriter((s) => s.sketches);
   const setSketch = useWriter((s) => s.setSketch);
   const dropSketch = useWriter((s) => s.dropSketch);
   const fontId = usePrefs((s) => s.fontId);
@@ -102,9 +103,10 @@ export function Editor() {
     const id = drawing;
     setDrawing(null);
     if (!id) return;
-    const open = currentEntry(useWriter.getState());
+    const state = useWriter.getState();
+    const open = currentEntry(state);
     if (!open) return;
-    const sketch = open.sketches?.find((s) => s.id === id);
+    const sketch = state.sketches.find((s) => s.id === id);
     if (sketch && !isBlank(sketch)) return;
     if (sketch) dropSketch(id);
     const ref = sketchRef(id);
@@ -213,7 +215,7 @@ export function Editor() {
   // A new sheet is the colour of the app you asked for it from; an existing one
   // keeps the paper it was drawn on, whichever theme you open it in.
   const open = drawing
-    ? (entry.sketches?.find((s) => s.id === drawing) ??
+    ? (sketches.find((s) => s.id === drawing) ??
       blankSketch(drawing, paperFor(resolvedTheme === "dark")))
     : null;
   const board = open && (
@@ -239,7 +241,7 @@ export function Editor() {
       content={entry.content}
       fontFamily={font.stack}
       fontSize={fontSize}
-      sketches={entry.sketches}
+      sketches={sketches}
       onEditSketch={setDrawing}
     />
   );

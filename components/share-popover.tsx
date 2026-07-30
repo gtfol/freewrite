@@ -8,6 +8,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { isWelcomeEntry } from "@/lib/entries";
+import { referencedIds } from "@/lib/sketch";
 import {
   clearShareRecord,
   expiresLabel,
@@ -27,6 +28,7 @@ type Busy = "create" | "update" | "delete" | null;
 
 export function SharePopover() {
   const entry = useWriter(currentEntry);
+  const sketches = useWriter((s) => s.sketches);
   const fontId = usePrefs((s) => s.fontId);
   const fontSize = usePrefs((s) => s.fontSize);
 
@@ -69,13 +71,16 @@ export function SharePopover() {
   const isEmpty = !text.trim();
   const stale = record !== null && entry.updatedAt > record.entryUpdatedAt;
   const ttlDays = Math.max(1, Math.round(ttlSeconds / 86_400));
+  const referenced = referencedIds(text);
 
   const snapshotBody = () =>
     JSON.stringify({
       content: entry.content,
       fontId,
       fontSize,
-      sketches: entry.sketches,
+      // Only what this entry's text points at — a share is one entry, not the
+      // whole drawer of drawings.
+      sketches: sketches.filter((s) => referenced.has(s.id)),
       createdAt: entry.createdAt,
     });
 

@@ -14,20 +14,19 @@ import {
   MAX_SKETCHES,
   PAPER,
   PAPER_DARK,
-  adoptSketches,
   blankSketch,
   inkBounds,
   isDarkPaper,
   paperFor,
+  parseSketch,
   parseSketches,
-  pruneSketches,
-  putSketch,
   quantize,
   referencedIds,
   sketchBefore,
   sketchFields,
   sketchIdFrom,
   sketchRef,
+  sweepSketches,
 } from "./sketch.ts";
 import type { Sketch } from "./types.ts";
 
@@ -97,89 +96,56 @@ test("sketchBefore stops at prose, a blank line, and the start of the entry", ()
   assert.equal(sketchBefore("/", 0), null);
 });
 
-test("putSketch replaces by id rather than appending a second copy", () => {
-  const first = sketch({ id: "aaaa11" });
-  const second = sketch({ id: "bbbb22" });
-  assert.deepEqual(putSketch(undefined, first), [first]);
+const DAY = 24 * 60 * 60 * 1000;
 
-  const both = putSketch([first], second);
-  assert.deepEqual(both.map((s) => s.id), ["aaaa11", "bbbb22"]);
-
-  const edited = { ...first, strokes: [stroke(), stroke({ id: 2 })] };
-  const after = putSketch(both, edited);
-  assert.equal(after.length, 2);
-  assert.equal(after[0].strokes.length, 2);
+test("sweepSketches doesn't touch a drawing a text still points at", () => {
+  const drawing = sketch({ id: "aaaa11" });
+  const sweep = sweepSketches([drawing], [`prose ${sketchRef("aaaa11")} prose`]);
+  assert.deepEqual(sweep, { orphaned: [], revived: [], collect: [] });
 });
 
-test("adoptSketches copies a pasted drawing into the entry it landed in", () => {
-  const source = sketch({ id: "aaaa11" });
-  const pasted = `look at this ${sketchRef("aaaa11")}`;
-
-  const adopted = adoptSketches(pasted, undefined, [source]);
-  assert.deepEqual(adopted?.map((s) => s.id), ["aaaa11"]);
-  // The entry keeps what it already had, and gains the pasted one.
-  const both = adoptSketches(pasted, [sketch({ id: "bbbb22" })], [source]);
-  assert.deepEqual(both?.map((s) => s.id), ["bbbb22", "aaaa11"]);
+test("sweepSketches notes an unclaimed drawing rather than collecting it", () => {
+  // This is the bug the per-entry model had: deleting the reference while
+  // rewriting the paragraph around it took the drawing with it, for good.
+  const drawing = sketch({ id: "aaaa11" });
+  const sweep = sweepSketches([drawing], ["the reference is gone for now"]);
+  assert.deepEqual(sweep.collect, []);
+  assert.deepEqual(sweep.orphaned.map((s) => s.id), ["aaaa11"]);
 });
 
-test("adoptSketches leaves the list alone when there is nothing to pick up", () => {
-  const own = [sketch({ id: "aaaa11" })];
-  const elsewhere = [sketch({ id: "bbbb22" })];
-
-  // Identity, not just equality: a keystroke that changes no drawings must not
-  // dirty the record and push it again.
-  assert.equal(adoptSketches("plain prose", own, elsewhere), own);
-  assert.equal(adoptSketches(sketchRef("aaaa11"), own, elsewhere), own);
-  // Referenced but nowhere to be found — a drawing that hasn't synced down, or
-  // whose entry is gone. The figure says so rather than being invented.
-  assert.equal(adoptSketches(sketchRef("cccc33"), own, elsewhere), own);
-  assert.equal(adoptSketches("plain prose", undefined, elsewhere), undefined);
+test("sweepSketches gives a drawing back when its reference returns", () => {
+  const orphaned = sketch({ id: "aaaa11", orphanedAt: Date.now() - 5 * DAY });
+  const sweep = sweepSketches([orphaned], [sketchRef("aaaa11")]);
+  assert.deepEqual(sweep.revived.map((s) => s.id), ["aaaa11"]);
+  assert.deepEqual(sweep.collect, []);
 });
 
-test("adoptSketches stops reading once it has what the text asked for", () => {
-  let read = 0;
-  function* elsewhere() {
-    for (const id of ["aaaa11", "bbbb22", "cccc33"]) {
-      read++;
-      yield sketch({ id });
-    }
-  }
-  adoptSketches(sketchRef("aaaa11"), undefined, elsewhere());
-  assert.equal(read, 1, "walked past the drawing it was looking for");
+test("sweepSketches waits out the grace period before collecting", () => {
+  const now = Date.now();
+  const young = sketch({ id: "aaaa11", orphanedAt: now - 29 * DAY });
+  const old = sketch({ id: "bbbb22", orphanedAt: now - 31 * DAY });
+  const sweep = sweepSketches([young, old], ["no references here"], now);
+  assert.deepEqual(sweep.collect, ["bbbb22"]);
+  // Already noted, so it isn't re-stamped — that would restart the clock and
+  // the drawing would never be collected at all.
+  assert.deepEqual(sweep.orphaned, []);
 });
 
-test("adoptSketches won't push an entry past the sketch ceiling", () => {
-  // Over the ceiling the record fails validation, and an entry that fails
-  // validation stops syncing without saying so.
-  const own = Array.from({ length: MAX_SKETCHES }, (_, i) =>
-    sketch({ id: `own${String(i).padStart(3, "0")}` })
+test("sweepSketches reads every text, not just the one being edited", () => {
+  // A drawing referenced from any entry is in use, which is what makes it
+  // possible to paste one somewhere else and keep both.
+  const drawing = sketch({ id: "aaaa11" });
+  const sweep = sweepSketches(
+    [drawing],
+    ["an entry with no drawings", `another one, with ${sketchRef("aaaa11")}`]
   );
-  const content = `${sketchRef("aaaa11")} ${sketchRef("bbbb22")}`;
-  assert.equal(
-    adoptSketches(content, own, [sketch({ id: "aaaa11" })]),
-    own
-  );
-
-  const nearly = own.slice(0, MAX_SKETCHES - 1);
-  const adopted = adoptSketches(content, nearly, [
-    sketch({ id: "aaaa11" }),
-    sketch({ id: "bbbb22" }),
-  ]);
-  assert.equal(adopted?.length, MAX_SKETCHES);
+  assert.deepEqual(sweep, { orphaned: [], revived: [], collect: [] });
 });
 
-test("pruneSketches drops drawings the text no longer points at", () => {
-  const kept = sketch({ id: "aaaa11" });
-  const orphan = sketch({ id: "bbbb22" });
-  const content = `words ${sketchRef("aaaa11")} more words`;
-
-  assert.deepEqual(pruneSketches(content, [kept, orphan]), [kept]);
-  // Nothing referenced at all: the field goes away rather than becoming [].
-  assert.equal(pruneSketches("just words", [orphan]), undefined);
-  // Untouched lists come back identical, so pruning can't dirty a record.
-  const all = [kept];
-  assert.equal(pruneSketches(content, all), all);
-  assert.equal(pruneSketches(content, undefined), undefined);
+test("sweepSketches leaves tombstones alone", () => {
+  const gone = sketch({ id: "aaaa11", deletedAt: Date.now() - 40 * DAY });
+  const sweep = sweepSketches([gone], ["nothing points at it"]);
+  assert.deepEqual(sweep, { orphaned: [], revived: [], collect: [] });
 });
 
 test("quantize rounds coordinates and is idempotent", () => {
@@ -349,6 +315,25 @@ test("parseSketches accepts a well-formed drawing", () => {
   assert.ok(parsed);
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0].strokes[0].points.length, 2);
+});
+
+test("parseSketch takes one record, and insists on its stamp", () => {
+  // The sync route hands them over one at a time, and updatedAt is what the
+  // mid-flight check compares — a record without one can't be tracked.
+  const parsed = parseSketch(sketch({ id: "aaaa11" }));
+  assert.equal(parsed?.id, "aaaa11");
+  assert.equal(parsed?.deletedAt, null);
+
+  const stampless: Record<string, unknown> = { ...sketch() };
+  delete stampless.updatedAt;
+  assert.equal(parseSketch(stampless), null);
+  assert.equal(parseSketch(sketch({ updatedAt: -1 })), null);
+  assert.equal(parseSketch(sketch({ deletedAt: "soon" as never })), null);
+
+  // A tombstone: no strokes left, and that's valid.
+  const tomb = parseSketch(sketch({ strokes: [], deletedAt: 123 }));
+  assert.equal(tomb?.strokes.length, 0);
+  assert.equal(tomb?.deletedAt, 123);
 });
 
 test("parseSketches treats absent and empty as nothing to store", () => {

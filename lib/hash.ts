@@ -1,5 +1,5 @@
 import { sketchFields } from "@/lib/sketch";
-import type { Article, Entry } from "@/lib/types";
+import type { Article, Entry, Sketch } from "@/lib/types";
 
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest(
@@ -15,13 +15,15 @@ async function sha256Hex(input: string): Promise<string> {
 // updatedAt stay out so identical content hashes identically on every device,
 // and read-state hashes as a boolean so wall-clock differences don't diverge.
 export function entryHash(e: Entry): Promise<string> {
-  const fields: unknown[] = [e.content, e.deletedAt ? 1 : 0];
-  // Appended only when drawings exist, so shipping the feature doesn't change
-  // the hash of — and re-push — every already-synced entry.
-  if (e.sketches?.length) {
-    fields.push(e.sketches.map(sketchFields));
-  }
-  return sha256Hex(JSON.stringify(fields));
+  return sha256Hex(JSON.stringify([e.content, e.deletedAt ? 1 : 0]));
+}
+
+// Positional, like the article's highlights below: postgres jsonb doesn't
+// preserve key order, so hashing the stroke objects themselves would let a
+// record come back from sync hashing differently than it went in — and a record
+// whose hash keeps changing under it never stops pushing.
+export function sketchHash(s: Sketch): Promise<string> {
+  return sha256Hex(JSON.stringify([...sketchFields(s), s.deletedAt ? 1 : 0]));
 }
 
 export function articleHash(a: Article): Promise<string> {

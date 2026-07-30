@@ -2,13 +2,16 @@
 // React, no drawesome runtime — the sync route, the share route, the preview
 // renderer and the tests all read from here.
 //
-// A sketch lives on the entry record rather than in its text, and the text
-// carries a reference to it: ![sketch](sketch:a3f1). Drawesome samples a point
-// roughly every 1.1px and stores it unrounded, so a real drawing is tens of
-// kilobytes of coordinates — five orders of magnitude past the Spotify link,
-// and not something to leave sitting in the middle of a paragraph you are
-// still writing. The reference is what gives the drawing its place in the
-// prose; the strokes ride along beside it.
+// A sketch is its own record, and a text points at one: ![sketch](sketch:a3f1).
+// Drawesome samples a point roughly every 1.1px and stores it unrounded, so a
+// real drawing is tens of kilobytes of coordinates — five orders of magnitude
+// past the Spotify link, and not something to leave sitting in the middle of a
+// paragraph you are still writing. The reference is what gives the drawing its
+// place in the prose.
+//
+// Resolving by that reference rather than by ownership is what lets a drawing be
+// copied between entries, and what keeps its life from hanging on the text
+// saying so at this instant. See sweepSketches for the other half of that.
 
 import type { Stroke } from "drawesome";
 
@@ -81,7 +84,16 @@ export function newSketchId(): string {
 }
 
 export function blankSketch(id = newSketchId(), bg = PAPER): Sketch {
-  return { id, w: BOARD.w, h: BOARD.h, bg, strokes: [] };
+  return {
+    id,
+    w: BOARD.w,
+    h: BOARD.h,
+    bg,
+    strokes: [],
+    updatedAt: Date.now(),
+    orphanedAt: null,
+    deletedAt: null,
+  };
 }
 
 export function isBlank(sketch: Sketch): boolean {
@@ -121,72 +133,53 @@ export function sketchBefore(value: string, index: number): string | null {
   return m ? m[1] : null;
 }
 
-export function putSketch(
-  sketches: Sketch[] | undefined,
-  sketch: Sketch
-): Sketch[] {
-  const list = sketches ?? [];
-  return list.some((s) => s.id === sketch.id)
-    ? list.map((s) => (s.id === sketch.id ? sketch : s))
-    : [...list, sketch];
+export const SKETCH_GRACE_MS = 30 * 24 * 60 * 60 * 1000;
+
+export interface Sweep {
+  /** Newly unclaimed: stamp orphanedAt so the clock starts. */
+  orphaned: Sketch[];
+  /** Claimed again: clear orphanedAt, the drawing is in use. */
+  revived: Sketch[];
+  /** Unclaimed for longer than the grace period. Safe to let go. */
+  collect: string[];
 }
 
 /**
- * Picks up drawings a text points at that the entry doesn't carry, from
- * wherever else they're kept. Copying a reference into another entry copies the
- * drawing with it, which is what makes paste do what paste looks like it does.
+ * What to do about drawings nothing points at, given every text that could
+ * point at one.
  *
- * The copy belongs to the entry it lands in, so drawing on it later doesn't
- * reach back into the entry it came from. Nothing here mutates a sketch — an
- * edit replaces the whole record — so the two entries can share the object
- * until one of them is drawn on.
- *
- * Returns `own` itself when there is nothing to pick up, so a keystroke that
- * changes no drawings can't dirty the record.
+ * Deliberately slow. A drawing is not collected the moment its reference leaves
+ * the text, because deleting the reference is something writers do all the time
+ * on the way to somewhere else — cutting it to move it, selecting a paragraph
+ * and retyping it, undoing further than intended. It has to still be there when
+ * the reference comes back. So the sweep only notes when a drawing first went
+ * unclaimed, and collects it a month later if nothing has claimed it since.
  */
-export function adoptSketches(
-  content: string,
-  own: Sketch[] | undefined,
-  elsewhere: Iterable<Sketch>
-): Sketch[] | undefined {
-  // Almost every keystroke lands here, and almost none of them are a paste.
-  if (!content.includes("sketch:")) return own;
-
-  const missing = referencedIds(content);
-  for (const s of own ?? []) missing.delete(s.id);
-  if (missing.size === 0) return own;
-
-  // Never past the ceiling: a record the validator rejects is one that stops
-  // syncing without saying so.
-  let room = MAX_SKETCHES - (own?.length ?? 0);
-  if (room <= 0) return own;
-
-  const found: Sketch[] = [];
-  for (const s of elsewhere) {
-    if (!missing.delete(s.id)) continue;
-    found.push(s);
-    if (--room === 0 || missing.size === 0) break;
+export function sweepSketches(
+  sketches: Iterable<Sketch>,
+  texts: Iterable<string>,
+  now = Date.now(),
+  grace = SKETCH_GRACE_MS
+): Sweep {
+  const live = new Set<string>();
+  for (const text of texts) {
+    if (!text.includes("sketch:")) continue;
+    for (const id of referencedIds(text)) live.add(id);
   }
-  return found.length ? [...(own ?? []), ...found] : own;
+
+  const sweep: Sweep = { orphaned: [], revived: [], collect: [] };
+  for (const sketch of sketches) {
+    if (sketch.deletedAt) continue;
+    if (live.has(sketch.id)) {
+      if (sketch.orphanedAt) sweep.revived.push(sketch);
+      continue;
+    }
+    if (!sketch.orphanedAt) sweep.orphaned.push(sketch);
+    else if (now - sketch.orphanedAt >= grace) sweep.collect.push(sketch.id);
+  }
+  return sweep;
 }
 
-// Drops drawings the text no longer points at. Called when the writer leaves
-// the entry rather than on every keystroke: cutting a reference to paste it
-// somewhere else is a normal edit, and it shouldn't take the drawing with it.
-export function pruneSketches(
-  content: string,
-  sketches: Sketch[] | undefined
-): Sketch[] | undefined {
-  if (!sketches?.length) return undefined;
-  const live = referencedIds(content);
-  const kept = sketches.filter((s) => live.has(s.id));
-  if (kept.length === sketches.length) return sketches;
-  return kept.length ? kept : undefined;
-}
-
-// How much white to leave around the ink when a drawing is shown as a figure,
-// and the smallest window onto the board that figure is allowed to be — so a
-// single dot doesn't fill the column at forty times its size.
 const CROP_PAD = 32;
 // Small enough that a real drawing keeps its own proportions — raise it and a
 // modest sketch gets padded out into a square — and only wide enough to stop a
@@ -379,6 +372,58 @@ function parseStroke(v: unknown, budget: { points: number }): Stroke | null {
 // Absent/empty → null; malformed → false. Malformed sketches must reject the
 // whole change rather than be dropped: the client's hash covers them, and
 // storing that hash over different data would wedge reconciliation.
+const stamp = (v: unknown): v is number => finite(v) && v >= 0;
+
+// One drawing, from a client. `budget` is shared across a batch so a caller
+// can't get past the point ceiling by splitting the payload up.
+function parseOne(v: unknown, budget: { points: number }): Sketch | null {
+  if (typeof v !== "object" || v === null) return null;
+  const s = v as Record<string, unknown>;
+  if (
+    typeof s.id !== "string" ||
+    !ID.test(s.id) ||
+    !board(s.w) ||
+    !board(s.h) ||
+    typeof s.bg !== "string" ||
+    !COLOR.test(s.bg) ||
+    !stamp(s.updatedAt) ||
+    !Array.isArray(s.strokes) ||
+    s.strokes.length > MAX_STROKES
+  ) {
+    return null;
+  }
+  const deleted = s.deletedAt;
+  if (deleted !== null && deleted !== undefined && !stamp(deleted)) return null;
+
+  const strokes: Stroke[] = [];
+  for (const raw of s.strokes) {
+    const stroke = parseStroke(raw, budget);
+    if (!stroke) return null;
+    strokes.push(stroke);
+  }
+  return {
+    id: s.id,
+    w: s.w,
+    h: s.h,
+    bg: s.bg,
+    strokes,
+    updatedAt: s.updatedAt,
+    deletedAt: (deleted as number | null | undefined) ?? null,
+  };
+}
+
+/** A single drawing, for the sync route, which takes them one record at a time. */
+export function parseSketch(v: unknown): Sketch | null {
+  return parseOne(v, { points: MAX_POINTS });
+}
+
+/**
+ * A batch of drawings, for the share snapshot, which gathers the ones an
+ * entry's text points at.
+ *
+ * Absent/empty → null; malformed → false. Malformed rejects the batch rather
+ * than dropping one, so a snapshot is never quietly missing a figure.
+ */
 export function parseSketches(v: unknown): Sketch[] | null | false {
   if (v === undefined || v === null) return null;
   if (!Array.isArray(v) || v.length > MAX_SKETCHES) return false;
@@ -386,29 +431,10 @@ export function parseSketches(v: unknown): Sketch[] | null | false {
   const out: Sketch[] = [];
   const seen = new Set<string>();
   for (const item of v) {
-    if (typeof item !== "object" || item === null) return false;
-    const s = item as Record<string, unknown>;
-    if (
-      typeof s.id !== "string" ||
-      !ID.test(s.id) ||
-      seen.has(s.id) ||
-      !board(s.w) ||
-      !board(s.h) ||
-      typeof s.bg !== "string" ||
-      !COLOR.test(s.bg) ||
-      !Array.isArray(s.strokes) ||
-      s.strokes.length > MAX_STROKES
-    ) {
-      return false;
-    }
-    seen.add(s.id);
-    const strokes: Stroke[] = [];
-    for (const raw of s.strokes) {
-      const stroke = parseStroke(raw, budget);
-      if (!stroke) return false;
-      strokes.push(stroke);
-    }
-    out.push({ id: s.id, w: s.w, h: s.h, bg: s.bg, strokes });
+    const sketch = parseOne(item, budget);
+    if (!sketch || seen.has(sketch.id)) return false;
+    seen.add(sketch.id);
+    out.push(sketch);
   }
   return out.length ? out : null;
 }

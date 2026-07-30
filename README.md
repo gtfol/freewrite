@@ -62,13 +62,15 @@ it saves as you draw, one save per stroke, the same as typing does. `Esc` goes b
 
 the sheet is dark if you asked for it from a dark app and light if you didn't, and it keeps that paper for good — the pen is chosen to suit the paper rather than the theme, so a drawing can't end up as pale ink on a pale sheet, and it looks the same later wherever it's read. in the prose it's shown cropped to what you actually drew, not to the whole sheet; open it again and the whole sheet is still there with your marks where you left them.
 
-the drawing itself is stored on the entry beside its text, and the text keeps a short reference to it (`![sketch](sketch:a3f1)`). strokes are tens of kilobytes of coordinates, which is the one thing that can't sit in the middle of a sentence you're still writing — so the line you see while writing stays a line, and the drawing rides along with the entry through sync and sharing. in Preview it renders as a figure; click it to open the board again. put the caret after a drawing's line and type `/` to reopen that one without Preview on.
+a drawing is a record of its own, and the text keeps a short reference to it (`![sketch](sketch:a3f1)`). strokes are tens of kilobytes of coordinates, which is the one thing that can't sit in the middle of a sentence you're still writing — so the line you see while writing stays a line. in Preview it renders as a figure; click it to open the board again. put the caret after a drawing's line and type `/` to reopen that one without Preview on.
 
-copying a drawing's reference into another entry copies the drawing with it, and the copy is its own from then on — draw on it there and the original is untouched.
+the reference is resolved wherever it's written, not against the entry that made it, so a drawing isn't owned by one entry and doesn't die with a moment's state of the text. delete the reference while you rewrite the paragraph around it and the drawing is still there when you put it back. a drawing nothing points at is noted on load and let go a month later, if nothing has claimed it by then.
+
+copying a drawing's reference into another entry shows the same drawing in both, and drawing on it changes it in both — it is one drawing, in two places.
 
 a downloaded entry is one markdown file with nowhere to keep a stroke list, so each drawing is embedded as an svg image instead. the file stops being editable as a drawing and starts being readable in anything that renders markdown.
 
-if you sync, apply `db/migrations/0004_entry_sketches.sql` — entries gained a `sketches` column.
+if you sync, apply `db/migrations/0005_sketches.sql` — drawings are their own table. (`0004` added a column on `entries` that `0005` supersedes; applying both in order is fine.)
 
 ## stack
 

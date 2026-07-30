@@ -3,7 +3,16 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-import { deleteEntry, listEntries, purgeTombstones, putEntry } from "@/lib/db";
+import {
+  deleteEntry,
+  deleteSketch,
+  listEntries,
+  listEntriesRaw,
+  listSketches,
+  purgeTombstones,
+  putEntry,
+  putSketch,
+} from "@/lib/db";
 import {
   createEntry,
   isToday,
@@ -12,7 +21,7 @@ import {
 } from "@/lib/entries";
 import { DEFAULT_FONT_ID, DEFAULT_FONT_SIZE } from "@/lib/fonts";
 import { clearShareRecord, getShareRecord } from "@/lib/shares";
-import { adoptSketches, pruneSketches, putSketch } from "@/lib/sketch";
+import { sweepSketches } from "@/lib/sketch";
 import type { Entry, Sketch } from "@/lib/types";
 
 // Preview cycles rather than toggles: writing only, writing beside the
@@ -141,6 +150,9 @@ export type SaveState = "idle" | "saving" | "saved" | "error";
 
 interface WriterState {
   entries: Entry[];
+  // Every drawing this device has, for the preview to resolve references
+  // against. Not grouped by entry: a reference resolves wherever it is written.
+  sketches: Sketch[];
   currentId: string | null;
   placeholder: string;
   ready: boolean;
@@ -228,43 +240,33 @@ function editCurrent(edit: (entry: Entry) => Entry) {
   saveTimeout = setTimeout(flushPending, 400);
 }
 
-// Every drawing on every other entry, lazily — adoptSketches stops reading as
-// soon as it has what the text asked for, so a paste doesn't walk the history.
-function* sketchesElsewhere(currentId: string): Generator<Sketch> {
-  for (const entry of useWriter.getState().entries) {
-    if (entry.id === currentId) continue;
-    for (const sketch of entry.sketches ?? []) yield sketch;
+/**
+ * Lets go of drawings nothing points at any more — but only long after the last
+ * reference went, and only if none has come back. Run once on load rather than
+ * on every edit: a reference leaving the text is not a decision to throw the
+ * drawing away, it's usually a paragraph being rewritten around it.
+ *
+ * Reads every entry including deleted ones' tombstones, which hold no text, so
+ * deleting an entry does eventually release the drawings only it referenced.
+ */
+async function sweep(): Promise<void> {
+  const sketches = await listSketches();
+  if (sketches.length === 0) return;
+  const texts = (await listEntriesRaw()).map((e) => e.content);
+  const { orphaned, revived, collect } = sweepSketches(sketches, texts);
+
+  for (const sketch of orphaned) {
+    await putSketch({ ...sketch, orphanedAt: Date.now() });
   }
-}
-
-// A reference the entry doesn't have a drawing for, when another entry does:
-// somebody pasted it, so take a copy. Also catches the reference that arrived
-// before its drawing did — a paste on one device, opened on another.
-function adoptCurrent() {
-  const { entries, currentId } = useWriter.getState();
-  const entry = entries.find((e) => e.id === currentId);
-  if (!entry) return;
-  const adopted = adoptSketches(
-    entry.content,
-    entry.sketches,
-    sketchesElsewhere(entry.id)
-  );
-  if (adopted !== entry.sketches) editCurrent((e) => ({ ...e, sketches: adopted }));
-}
-
-// Drawings the text no longer points at go when the writer leaves the entry,
-// rather than the moment the reference disappears: cutting one to paste it
-// further down is an ordinary edit, and it mustn't take the drawing with it.
-function pruneCurrent() {
-  const { entries, currentId } = useWriter.getState();
-  const entry = entries.find((e) => e.id === currentId);
-  if (!entry?.sketches?.length) return;
-  const kept = pruneSketches(entry.content, entry.sketches);
-  if (kept !== entry.sketches) editCurrent((e) => ({ ...e, sketches: kept }));
+  for (const sketch of revived) {
+    await putSketch({ ...sketch, orphanedAt: null });
+  }
+  for (const id of collect) await deleteSketch(id);
 }
 
 export const useWriter = create<WriterState>()((set, get) => ({
   entries: [],
+  sketches: [],
   currentId: null,
   placeholder: "Begin writing",
   ready: false,
@@ -295,8 +297,18 @@ export const useWriter = create<WriterState>()((set, get) => ({
     }
 
     rememberEntry(currentId);
-    set({ entries, currentId, placeholder: randomPlaceholder(), ready: true });
+    set({
+      entries,
+      sketches: await listSketches(),
+      currentId,
+      placeholder: randomPlaceholder(),
+      ready: true,
+    });
     void purgeTombstones();
+    // After the writer is up: it walks every entry, and nothing waits on it.
+    void sweep().then(async () => {
+      set({ sketches: await listSketches() });
+    });
   },
 
   reload: async () => {
@@ -320,42 +332,41 @@ export const useWriter = create<WriterState>()((set, get) => ({
       }
       rememberEntry(currentId);
     }
-    set({ entries, currentId });
+    set({ entries, sketches: await listSketches(), currentId });
   },
 
   setContent: (content) => {
-    const { currentId } = get();
-    editCurrent((e) => ({
-      ...e,
-      content,
-      // A pasted reference brings its drawing along, in the same edit that
-      // pasted it — so the figure is there rather than appearing a beat later.
-      sketches: adoptSketches(
-        content,
-        e.sketches,
-        sketchesElsewhere(currentId ?? "")
-      ),
-    }));
+    editCurrent((e) => ({ ...e, content }));
   },
 
   // Every finished stroke lands here, so a drawing saves the way typing does
-  // and there is no Done button to forget to press.
+  // and there is no Done button to forget to press. Written straight through to
+  // its own record rather than through the entry's debounce: a drawing is not
+  // the entry it happens to be referenced from.
   setSketch: (sketch) => {
-    editCurrent((e) => ({ ...e, sketches: putSketch(e.sketches, sketch) }));
+    const next = { ...sketch, orphanedAt: null, updatedAt: Date.now() };
+    set((s) => ({
+      sketches: s.sketches.some((x) => x.id === next.id)
+        ? s.sketches.map((x) => (x.id === next.id ? next : x))
+        : [...s.sketches, next],
+      saveState: "saving",
+    }));
+    void putSketch(next).then(
+      () => settleSaveState("saved"),
+      () => settleSaveState("error")
+    );
   },
 
   // A drawing closed without a mark on it. Its reference goes with it, back in
   // the editor — nothing is left behind by opening the board and changing your
-  // mind.
+  // mind. Deleted outright rather than left to the sweep, because this one is a
+  // decision: there was never anything on it.
   dropSketch: (id) => {
-    editCurrent((e) => {
-      const kept = e.sketches?.filter((s) => s.id !== id);
-      return { ...e, sketches: kept?.length ? kept : undefined };
-    });
+    set((s) => ({ sketches: s.sketches.filter((x) => x.id !== id) }));
+    void deleteSketch(id);
   },
 
   addEntry: () => {
-    pruneCurrent();
     flushPending();
     const fresh = createEntry();
     void putEntry(fresh);
@@ -369,11 +380,9 @@ export const useWriter = create<WriterState>()((set, get) => ({
   },
 
   select: (id) => {
-    pruneCurrent();
     flushPending();
     rememberEntry(id);
     set({ currentId: id });
-    adoptCurrent();
   },
 
   remove: async (id) => {
