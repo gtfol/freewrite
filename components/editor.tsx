@@ -1,13 +1,14 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useTheme } from "next-themes";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MarkdownPreview } from "@/components/markdown-preview";
 import { SplitPreviewHint } from "@/components/preview-hint";
 import { useSlashMenu } from "@/components/slash-menu";
 import { fontById } from "@/lib/fonts";
-import { blankSketch, isBlank, sketchRef } from "@/lib/sketch";
+import { blankSketch, isBlank, paperFor, sketchRef } from "@/lib/sketch";
 import { currentEntry, usePrefs, useWriter } from "@/lib/store";
 
 // The board and drawesome's stylesheet only load once someone asks to draw —
@@ -85,6 +86,8 @@ export function Editor() {
   const fontSize = usePrefs((s) => s.fontSize);
   const backspaceDisabled = usePrefs((s) => s.backspaceDisabled);
   const previewMode = usePrefs((s) => s.previewMode);
+
+  const { resolvedTheme } = useTheme();
 
   const ref = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -207,8 +210,11 @@ export function Editor() {
   // textarea in either layout without caring where in the tree they sit. The
   // board is only in the tree while it's open, which is what keeps drawesome's
   // single-key shortcuts away from the writing.
+  // A new sheet is the colour of the app you asked for it from; an existing one
+  // keeps the paper it was drawn on, whichever theme you open it in.
   const open = drawing
-    ? (entry.sketches?.find((s) => s.id === drawing) ?? blankSketch(drawing))
+    ? (entry.sketches?.find((s) => s.id === drawing) ??
+      blankSketch(drawing, paperFor(resolvedTheme === "dark")))
     : null;
   const board = open && (
     <DrawOverlay

@@ -4,7 +4,7 @@
 
 import { toSvg } from "drawesome";
 
-import { sketchRef } from "@/lib/sketch";
+import { inkBounds, sketchRef } from "@/lib/sketch";
 import type { Sketch } from "@/lib/types";
 
 // Drawesome names its erase masks e0, e1… counting from zero in each drawing.
@@ -17,11 +17,29 @@ function isolateMasks(svg: string, id: string): string {
     .replace(/url\(#e(\d+)\)/g, `url(#${id}-e$1)`);
 }
 
-export function sketchSvg(sketch: Sketch): string {
-  return isolateMasks(
+// Points the serialized SVG at the drawn part of the board instead of all of
+// it. Matching drawesome's exact header rather than parsing: if a future
+// version words it differently the replace finds nothing, and the figure is
+// the whole sheet — which is the old behaviour, not a broken one.
+function crop(svg: string, sketch: Sketch, box: ReturnType<typeof inkBounds>) {
+  return svg.replace(
+    `width="${sketch.w}" height="${sketch.h}" viewBox="0 0 ${sketch.w} ${sketch.h}"`,
+    `width="${box.w}" height="${box.h}" viewBox="${box.x} ${box.y} ${box.w} ${box.h}"`
+  );
+}
+
+/** A drawing as a picture, cropped to its ink, with the shape to reserve for it. */
+export function sketchView(sketch: Sketch): { svg: string; ratio: number } {
+  const box = inkBounds(sketch);
+  const svg = isolateMasks(
     toSvg(sketch.strokes, sketch.w, sketch.h, sketch.bg),
     sketch.id
   );
+  return { svg: crop(svg, sketch, box), ratio: box.w / box.h };
+}
+
+export function sketchSvg(sketch: Sketch): string {
+  return sketchView(sketch).svg;
 }
 
 // The serialized SVG is markup, numbers and hex colours and nothing else — no

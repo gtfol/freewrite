@@ -13,7 +13,11 @@ import {
   BOARD,
   MAX_SKETCHES,
   PAPER,
+  PAPER_DARK,
   blankSketch,
+  inkBounds,
+  isDarkPaper,
+  paperFor,
   parseSketches,
   pruneSketches,
   putSketch,
@@ -155,6 +159,131 @@ test("sketchFields is positional, so key order can't change the hash", () => {
   // their order, and a record has to hash the same after a round trip.
   const json = JSON.stringify(flat);
   assert.ok(!json.includes("{"), `hash input carries an object: ${json}`);
+});
+
+test("paper and pen are decided together, so ink is never lost on the sheet", () => {
+  // The bug this guards: drawesome takes its starting ink from the theme it is
+  // handed, so a dark-themed board on white paper draws near-white on white.
+  assert.equal(paperFor(false), PAPER);
+  assert.equal(paperFor(true), PAPER_DARK);
+  assert.equal(isDarkPaper(PAPER), false);
+  assert.equal(isDarkPaper(PAPER_DARK), true);
+
+  // A new sheet takes the paper it's given; the default stays light.
+  assert.equal(blankSketch("aaaa11").bg, PAPER);
+  assert.equal(blankSketch("aaaa11", PAPER_DARK).bg, PAPER_DARK);
+});
+
+test("isDarkPaper judges by luminance, not by a list", () => {
+  assert.equal(isDarkPaper("#000"), true);
+  assert.equal(isDarkPaper("#fff"), false);
+  assert.equal(isDarkPaper("#222222"), true);
+  assert.equal(isDarkPaper("#eeeeee"), false);
+  // Yellow is bright despite being saturated; navy is not.
+  assert.equal(isDarkPaper("#ffee00"), false);
+  assert.equal(isDarkPaper("#001b44"), true);
+  // 8-digit hex carries an alpha the paper decision doesn't depend on.
+  assert.equal(isDarkPaper("#131315ff"), true);
+});
+
+test("inkBounds frames the ink rather than the whole board", () => {
+  const box = inkBounds(
+    sketch({
+      strokes: [
+        stroke({
+          size: 0,
+          points: [
+            [500, 300, 0.5],
+            [1100, 700, 0.5],
+          ] as Sketch["strokes"][number]["points"],
+        }),
+      ],
+    })
+  );
+  // 32 of padding on each side of a 600×400 mark, and none of the board's
+  // 1600×1000 of mostly-empty sheet.
+  assert.deepEqual(box, { x: 468, y: 268, w: 664, h: 464 });
+});
+
+test("inkBounds keeps a small mark from filling the column", () => {
+  const box = inkBounds(
+    sketch({
+      strokes: [
+        stroke({ size: 0, points: [[800, 500, 0.5]] as Sketch["strokes"][number]["points"] }),
+      ],
+    })
+  );
+  // A single dot would otherwise be magnified past all sense.
+  assert.equal(box.w, 160);
+  assert.equal(box.h, 160);
+  assert.equal(box.x + box.w / 2, 800);
+});
+
+test("inkBounds leaves a real drawing its own proportions", () => {
+  // The floor is only for tiny marks: a sketch with any size to it must not be
+  // padded out into a square, which is the composition changing under you.
+  const box = inkBounds(
+    sketch({
+      strokes: [
+        stroke({
+          size: 0,
+          points: [
+            [700, 400, 0.5],
+            [900, 550, 0.5],
+          ] as Sketch["strokes"][number]["points"],
+        }),
+      ],
+    })
+  );
+  assert.deepEqual(box, { x: 668, y: 368, w: 264, h: 214 });
+});
+
+test("inkBounds stays on the board when the ink runs to an edge", () => {
+  const box = inkBounds(
+    sketch({
+      strokes: [
+        stroke({ size: 0, points: [[0, 0, 0.5], [40, 40, 0.5]] as Sketch["strokes"][number]["points"] }),
+      ],
+    })
+  );
+  assert.equal(box.x, 0);
+  assert.equal(box.y, 0);
+  assert.ok(box.x + box.w <= BOARD.w, "window hangs off the right");
+  assert.ok(box.y + box.h <= BOARD.h, "window hangs off the bottom");
+});
+
+test("inkBounds counts stroke width, and ignores erasing", () => {
+  const wide = inkBounds(
+    sketch({
+      strokes: [
+        stroke({ size: 100, points: [[800, 500, 0.5]] as Sketch["strokes"][number]["points"] }),
+      ],
+    })
+  );
+  // A 100-wide nib puts ink 50 either side of the point it was sampled at,
+  // which with padding clears the floor on its own.
+  assert.equal(wide.w, 164);
+
+  // The same drawing with an eraser pass swept across the far corner: erasing
+  // takes ink away, so it can't be what makes the figure big.
+  const erased = inkBounds(
+    sketch({
+      strokes: [
+        stroke({ size: 100, points: [[800, 500, 0.5]] as Sketch["strokes"][number]["points"] }),
+        stroke({ id: 2, erase: true, size: 40, points: [[20, 20, 0.5]] as Sketch["strokes"][number]["points"] }),
+      ],
+    })
+  );
+  assert.deepEqual(erased, wide);
+});
+
+test("inkBounds falls back to the sheet when there is nothing drawn", () => {
+  assert.deepEqual(inkBounds(sketch({ strokes: [] })), {
+    x: 0,
+    y: 0,
+    w: BOARD.w,
+    h: BOARD.h,
+  });
 });
 
 test("parseSketches accepts a well-formed drawing", () => {

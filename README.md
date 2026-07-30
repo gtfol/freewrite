@@ -60,6 +60,8 @@ typing `/` also offers a whiteboard. it opens full screen — writing and drawin
 
 it saves as you draw, one save per stroke, the same as typing does. `Esc` goes back. close it without drawing anything and the entry is exactly as you left it.
 
+the sheet is dark if you asked for it from a dark app and light if you didn't, and it keeps that paper for good — the pen is chosen to suit the paper rather than the theme, so a drawing can't end up as pale ink on a pale sheet, and it looks the same later wherever it's read. in the prose it's shown cropped to what you actually drew, not to the whole sheet; open it again and the whole sheet is still there with your marks where you left them.
+
 the drawing itself is stored on the entry beside its text, and the text keeps a short reference to it (`![sketch](sketch:a3f1)`). strokes are tens of kilobytes of coordinates, which is the one thing that can't sit in the middle of a sentence you're still writing — so the line you see while writing stays a line, and the drawing rides along with the entry through sync and sharing. in Preview it renders as a figure; click it to open the board again. put the caret after a drawing's line and type `/` to reopen that one without Preview on.
 
 a downloaded entry is one markdown file with nowhere to keep a stroke list, so each drawing is embedded as an svg image instead. the file stops being editable as a drawing and starts being readable in anything that renders markdown.

@@ -20,10 +20,37 @@ import type { Sketch } from "@/lib/types";
 // the same drawing on a laptop.
 export const BOARD = { w: 1600, h: 1000 };
 
-// White paper, whatever the app's theme is. Ink colours are stored absolutely,
-// so a board that followed the theme would come out as a dark rectangle on a
-// light shared page — the drawing has to look the same everywhere it lands.
+// The paper a drawing is made on, kept with it rather than read off the app's
+// theme at render time. Drawesome picks its starting ink from the theme it is
+// given, so paper and ink have to be decided together or you get near-white
+// ink on a white sheet: invisible while you draw, and invisible again as a
+// figure. Storing the paper means a drawing carries both, and looks the same
+// wherever it is later rendered — the preview, a share link, the downloaded
+// file — instead of changing under whoever is reading it.
+//
+// PAPER_DARK is the app's own dark background, so a drawing made in dark mode
+// reads as ink on the page rather than a panel sitting on it.
 export const PAPER = "#ffffff";
+export const PAPER_DARK = "#131315";
+
+export function paperFor(dark: boolean): string {
+  return dark ? PAPER_DARK : PAPER;
+}
+
+/**
+ * Whether a sheet is dark enough to want light ink on it. Relative luminance
+ * rather than a list of known papers, so a drawing made on any paper — now, or
+ * on one chosen by hand later — still gets a pen that shows up on it.
+ */
+export function isDarkPaper(bg: string): boolean {
+  const hex = bg.replace("#", "");
+  const full =
+    hex.length === 3
+      ? [...hex].map((c) => c + c).join("")
+      : hex.slice(0, 6).padEnd(6, "0");
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5;
+}
 
 // Ceilings, shared by the writer and the two routes that accept sketches from
 // a client. Generous enough that nobody draws into them by hand.
@@ -53,8 +80,8 @@ export function newSketchId(): string {
   return Math.random().toString(36).slice(2, 8).padEnd(6, "0");
 }
 
-export function blankSketch(id = newSketchId()): Sketch {
-  return { id, w: BOARD.w, h: BOARD.h, bg: PAPER, strokes: [] };
+export function blankSketch(id = newSketchId(), bg = PAPER): Sketch {
+  return { id, w: BOARD.w, h: BOARD.h, bg, strokes: [] };
 }
 
 export function isBlank(sketch: Sketch): boolean {
@@ -116,6 +143,74 @@ export function pruneSketches(
   const kept = sketches.filter((s) => live.has(s.id));
   if (kept.length === sketches.length) return sketches;
   return kept.length ? kept : undefined;
+}
+
+// How much white to leave around the ink when a drawing is shown as a figure,
+// and the smallest window onto the board that figure is allowed to be — so a
+// single dot doesn't fill the column at forty times its size.
+const CROP_PAD = 32;
+// Small enough that a real drawing keeps its own proportions — raise it and a
+// modest sketch gets padded out into a square — and only wide enough to stop a
+// lone dot being blown up to fill the column.
+const CROP_MIN = 160;
+
+// Grows [lo, hi] by the padding, up to the minimum, and slides it back onto
+// the board rather than letting it hang off the edge.
+function window1d(lo: number, hi: number, limit: number): [number, number] {
+  let a = lo - CROP_PAD;
+  let b = hi + CROP_PAD;
+  const short = CROP_MIN - (b - a);
+  if (short > 0) {
+    a -= short / 2;
+    b += short / 2;
+  }
+  if (a < 0) {
+    b -= a;
+    a = 0;
+  }
+  if (b > limit) {
+    a -= b - limit;
+    b = limit;
+  }
+  return [Math.max(0, Math.round(a)), Math.min(limit, Math.round(b))];
+}
+
+/**
+ * The part of the board worth showing: the box the ink occupies, padded. A
+ * figure in the prose should be as big as what was drawn, not as big as the
+ * board it was drawn on — most of a 1600×1000 sheet is usually empty.
+ *
+ * Only ever used for display. The strokes keep their board coordinates, so
+ * reopening the drawing gives back the whole sheet with the marks where they
+ * were left.
+ */
+export function inkBounds(sketch: Sketch): {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+} {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const s of sketch.strokes) {
+    // An eraser pass takes ink away, so it can't be what makes a drawing big.
+    if (s.erase) continue;
+    const r = s.size / 2;
+    for (const [x, y] of s.points) {
+      if (x - r < minX) minX = x - r;
+      if (y - r < minY) minY = y - r;
+      if (x + r > maxX) maxX = x + r;
+      if (y + r > maxY) maxY = y + r;
+    }
+  }
+  // Nothing drawn, or nothing but erasing: show the sheet.
+  if (minX === Infinity) return { x: 0, y: 0, w: sketch.w, h: sketch.h };
+
+  const [x0, x1] = window1d(minX, maxX, sketch.w);
+  const [y0, y1] = window1d(minY, maxY, sketch.h);
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
 const round = (n: number, places: number): number => {

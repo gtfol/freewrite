@@ -2,10 +2,9 @@
 
 import { Draw, type DrawHandle } from "drawesome";
 import { X } from "lucide-react";
-import { useTheme } from "next-themes";
 import { useEffect, useRef, useState } from "react";
 
-import { quantize } from "@/lib/sketch";
+import { isDarkPaper, quantize } from "@/lib/sketch";
 import type { Sketch } from "@/lib/types";
 
 import "drawesome/styles.css";
@@ -35,7 +34,6 @@ export function DrawOverlay({
   onChange: (strokes: Sketch["strokes"]) => void;
   onClose: () => void;
 }) {
-  const { resolvedTheme } = useTheme();
   const handle = useRef<DrawHandle>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [narrow, setNarrow] = useState(false);
@@ -97,7 +95,13 @@ export function DrawOverlay({
           background={sketch.bg}
           initialStrokes={sketch.strokes}
           onChange={(strokes) => onChange(quantize(strokes))}
-          theme={resolvedTheme === "dark" ? "dark" : "light"}
+          // Taken from the paper rather than from the app, because this prop is
+          // what drawesome picks its starting ink from: a dark theme hands you
+          // near-white ink, which on a white sheet you can barely see while you
+          // draw and can't see at all as a figure. Reading it off the drawing
+          // keeps the pen and the paper in agreement — including when a sheet
+          // made in one theme is reopened in the other.
+          theme={isDarkPaper(sketch.bg) ? "dark" : "light"}
           placement={narrow ? "left" : "bottom"}
           tools={narrow ? [...NARROW_TOOLS] : undefined}
           controls={

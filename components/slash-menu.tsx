@@ -28,12 +28,15 @@ const DRAW_KEYWORDS = [
   "doodle",
 ];
 
+// Rows are plain data and the key says which command they are, rather than
+// each carrying its own callback: what a row does depends on the textarea, and
+// a list of closures over that ref isn't something to be building during a
+// render.
 interface Item {
-  key: string;
+  key: "song" | "draw";
   label: string;
   hint: string;
   keywords: string[];
-  run: () => void;
 }
 
 function matchesQuery(item: Item, query: string): boolean {
@@ -269,23 +272,19 @@ export function useSlashMenu(
     songHint = "access expired";
   }
 
-  const songItem: Item | null = configured
-    ? {
-        key: "song",
-        label: songLabel,
-        hint: note ?? songHint,
-        keywords: SONG_KEYWORDS,
-        run: () => void runSong(),
-      }
-    : null;
+  const songItem: Item = {
+    key: "song",
+    label: songLabel,
+    hint: note ?? songHint,
+    keywords: SONG_KEYWORDS,
+  };
   const drawItem: Item = {
     key: "draw",
     label: editing ? "Edit whiteboard" : "Whiteboard",
     hint: editing ? "reopen the drawing above" : "draw, and it lands here",
     keywords: DRAW_KEYWORDS,
-    run: runDraw,
   };
-  const items = songItem ? [songItem, drawItem] : [drawItem];
+  const items = configured ? [songItem, drawItem] : [drawItem];
 
   const visible = items.filter((item) => matchesQuery(item, query));
   const selected = Math.min(cursor, Math.max(0, visible.length - 1));
@@ -313,6 +312,14 @@ export function useSlashMenu(
     };
   }, [showing, ref, place, rowCount]);
 
+  const run = useCallback(
+    (key: Item["key"]) => {
+      if (key === "song") void runSong();
+      else runDraw();
+    },
+    [runSong, runDraw]
+  );
+
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
       if (!showing) return false;
@@ -323,7 +330,8 @@ export function useSlashMenu(
       }
       if (event.key === "Enter" || event.key === "Tab") {
         event.preventDefault();
-        visible[selected]?.run();
+        const key = visible[selected]?.key;
+        if (key) run(key);
         return true;
       }
       // Up and down pick, but only when there is something to pick between.
@@ -342,7 +350,7 @@ export function useSlashMenu(
       if (event.key.startsWith("Arrow")) close();
       return false;
     },
-    [showing, close, visible, selected]
+    [showing, close, visible, selected, run]
   );
 
   const node =
@@ -362,7 +370,7 @@ export function useSlashMenu(
             // Keeps the caret where it is instead of blurring on the way in.
             onMouseDown={(event) => event.preventDefault()}
             onMouseEnter={() => setCursor(i)}
-            onClick={item.run}
+            onClick={() => run(item.key)}
             className={`flex w-full flex-col items-start gap-0.5 rounded-md px-3 py-2 text-left transition-colors ${
               i === selected ? "bg-accent" : ""
             }`}

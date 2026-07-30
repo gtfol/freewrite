@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { JsonTree } from "@/components/json-tree";
 import { Lightbox, type LightboxMedia } from "@/components/lightbox";
 import { BOARD, sketchIdFrom } from "@/lib/sketch";
-import { sketchDataUri, sketchSvg } from "@/lib/sketch-svg";
+import { sketchDataUri, sketchView } from "@/lib/sketch-svg";
 import { embedUrl, splitLabel, trackIdFrom } from "@/lib/spotify";
 import type { Sketch } from "@/lib/types";
 
@@ -296,10 +296,8 @@ export function MarkdownPreview({
   // Serializing is the expensive part, so it happens once per change to the
   // drawings rather than once per keystroke in the side-by-side pane.
   const svgById = useMemo(() => {
-    const map = new Map<string, { svg: string; ratio: number }>();
-    for (const s of sketches ?? []) {
-      map.set(s.id, { svg: sketchSvg(s), ratio: s.w / s.h });
-    }
+    const map = new Map<string, ReturnType<typeof sketchView>>();
+    for (const s of sketches ?? []) map.set(s.id, sketchView(s));
     return map;
   }, [sketches]);
 
