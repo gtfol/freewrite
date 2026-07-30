@@ -46,19 +46,37 @@ export function DrawOverlay({
   }, []);
 
   useEffect(() => {
-    // Capture phase, so Escape closes the board before drawesome's own window
-    // listener can read it, and focus goes back to the caret on the way out.
     const previous = document.activeElement as HTMLElement | null;
-    closeRef.current?.focus();
+    // Nothing is focused on the way in, rather than the close button. Drawesome
+    // only answers a key when focus is inside its own surface or nowhere at
+    // all, so focusing the button here would leave every shortcut — undo, and
+    // each of the pens — dead until you happened to click the toolbar. Blurring
+    // also keeps stray keystrokes out of the entry behind the board.
+    previous?.blur?.();
+
+    // Capture phase, so these land before drawesome's own window listener and
+    // are handled once. Undo is driven through the handle rather than left to
+    // that listener, so it still works when focus has moved to the close
+    // button — the one place a Tab can put it.
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.stopPropagation();
         onClose();
+        return;
       }
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      const redo = key === "y" || (key === "z" && event.shiftKey);
+      if (key !== "z" && key !== "y") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (redo) handle.current?.redo();
+      else handle.current?.undo();
     };
     document.addEventListener("keydown", onKeyDown, true);
     return () => {
       document.removeEventListener("keydown", onKeyDown, true);
+      // Back to the caret, where the writing was left.
       previous?.focus?.();
     };
   }, [onClose]);
