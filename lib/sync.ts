@@ -22,6 +22,7 @@ import {
 } from "@/lib/db";
 import { createEntry, WELCOME_CONTENT } from "@/lib/entries";
 import { articleHash, entryHash, rootDigest } from "@/lib/hash";
+import { useSpotify } from "@/lib/spotify-connect";
 import { useWriter } from "@/lib/store";
 import type {
   Article,
@@ -97,7 +98,9 @@ interface SyncUser {
 
 interface SyncState {
   status: SyncStatus;
-  providers: { google: boolean; email: boolean };
+  // Not all of these are ways in: spotify is a provider you attach to an
+  // account you already have. See lib/server/auth.ts.
+  providers: { google: boolean; email: boolean; spotify: boolean };
   user: SyncUser | null;
   lastSyncAt: number | null;
   error: string | null;
@@ -397,7 +400,7 @@ async function ensureReconciled(user: SyncUser): Promise<boolean> {
 
 export const useSync = create<SyncState>()((set, get) => ({
   status: "loading",
-  providers: { google: false, email: false },
+  providers: { google: false, email: false, spotify: false },
   user: null,
   lastSyncAt: null,
   error: null,
@@ -545,6 +548,10 @@ export const useSync = create<SyncState>()((set, get) => ({
 
   signOut: async () => {
     await authClient.signOut();
+    // Spotify hangs off the account that just went away — leaving "connected"
+    // behind would offer the next writer a song they can't reach.
+    useSpotify.getState().forget();
+    useSpotify.setState({ linked: null });
     set({ user: null, status: "signed-out", lastSyncAt: null });
   },
 }));

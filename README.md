@@ -39,6 +39,21 @@ entries can be published as read-only pages (`share` in the nav), and the reader
 
 links are unlisted (random 128-bit ids), noindexed, and expire on their own. the create/update/delete secret never leaves the author's browser.
 
+## song of the day (optional)
+
+if you use the writer as a daily journal, typing `/` offers the song you played most today. needs sync turned on first — spotify hangs off your account.
+
+1. create an app in the [spotify dashboard](https://developer.spotify.com/dashboard)
+2. add `<your url>/api/auth/callback/spotify` as a redirect uri. locally that's `http://127.0.0.1:3000/api/auth/callback/spotify` — spotify rejects `localhost`, so visit the app on `127.0.0.1` too and set `BETTER_AUTH_URL` to match
+3. set `SPOTIFY_CLIENT_ID` + `SPOTIFY_CLIENT_SECRET`
+4. redeploy, sign in, then `Connect Spotify` in the cloud menu
+
+spotify only ever attaches to an account you already have: it can't create one and it can't sign you in. the one scope asked for is `user-read-recently-played`, and the token stays on the server — the browser only ever sees a track name and an id.
+
+the song lands in your entry as an ordinary markdown link (`[♫ title · artist](…)`), so it reads fine while you write, downloads with the entry, and syncs like any other text. in Preview it renders as a small card; click the card and spotify's player takes its place, so nothing loads from spotify until you ask it to.
+
+worth knowing: spotify's play history is the last 50 plays and can't be paged past, so "most played today" is counted inside that window. on a quiet day everything has a single play and you get the most recent one.
+
 ## stack
 
 next.js · tailwind · shadcn/ui · zustand · indexeddb · piper via onnx runtime web (on-device tts) · better auth + supabase (optional sync)

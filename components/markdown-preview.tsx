@@ -2,10 +2,11 @@
 
 import hljs from "highlight.js/lib/common";
 import { Marked } from "marked";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { JsonTree } from "@/components/json-tree";
 import { Lightbox, type LightboxMedia } from "@/components/lightbox";
+import { embedUrl, splitLabel, trackIdFrom } from "@/lib/spotify";
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -65,6 +66,41 @@ function mediaHtml(media: Media): string {
   }
 }
 
+// A Spotify track link shows as a small card carrying the title and artist the
+// link is already labeled with, and loads Spotify's player only once clicked —
+// the same bargain as the YouTube poster above. There is no artwork to show
+// until then: the entry text holds a title and an artist, and fetching the
+// cover would be the third-party request the card exists to avoid.
+function spotifyChip(id: string, text: string): string {
+  const { title, sub } = splitLabel(text);
+  return (
+    `<span class="spotify-chip" data-spotify="${escapeAttr(id)}"` +
+    ` role="button" tabindex="0" title="Click to play">` +
+    `<span class="spotify-glyph" aria-hidden="true"></span>` +
+    `<span class="spotify-text">` +
+    `<span class="spotify-title">${escapeHtml(title)}</span>` +
+    `<span class="spotify-sub">${escapeHtml(sub)}</span>` +
+    `</span></span>`
+  );
+}
+
+// The compact player. Once it's in, it stays in.
+function spotifyEmbed(id: string): string {
+  return (
+    `<span class="spotify-embed">` +
+    `<iframe src="${escapeAttr(embedUrl(id))}" height="152" loading="lazy"` +
+    ` frameborder="0" title="Spotify player"` +
+    ` allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"` +
+    `></iframe></span>`
+  );
+}
+
+// Tracks whose player has been asked for. Module-level, so it outlives the
+// preview being toggled off and back on — clicking play is a decision about
+// the song, not about the pane. Deliberately not persisted: on a fresh visit
+// every song is a card again, which is the whole point of the card.
+const played = new Set<string>();
+
 const marked = new Marked({
   gfm: true,
   // Freewriting treats a single newline as a line break, so the preview
@@ -86,7 +122,13 @@ const marked = new Marked({
     },
     // A pasted bare URL (text === href) to an image, video file, or YouTube
     // page embeds the media itself; a deliberately labeled link stays a link.
+    //
+    // Spotify tracks are the exception on purpose: the / command writes a
+    // labeled link precisely so the raw text stays readable while you write,
+    // so a label can't be what disqualifies it from embedding.
     link({ href, text }) {
+      const track = trackIdFrom(href);
+      if (track) return spotifyChip(track, text === href ? "" : text);
       if (text !== href) return false;
       const media = mediaFor(href);
       return media ? mediaHtml(media) : false;
@@ -222,6 +264,32 @@ export function MarkdownPreview({
 }) {
   const segments = useMemo(() => segment(content), [content]);
   const [zoomed, setZoomed] = useState<LightboxMedia | null>(null);
+  const root = useRef<HTMLDivElement>(null);
+
+  // Editing the entry re-injects the markdown and takes any open player with
+  // it, so the swap is re-applied after every render. What a player can't
+  // survive is the writing beside it changing: that rebuilds the frame, and a
+  // rebuilt frame starts over. True while typing in the side-by-side pane;
+  // not an issue in the full-width preview or on a shared page, where the
+  // text is standing still.
+  useEffect(() => {
+    if (played.size === 0) return;
+    const nodes = root.current?.querySelectorAll<HTMLElement>("[data-spotify]");
+    for (const node of nodes ?? []) {
+      const id = node.dataset.spotify;
+      if (id && played.has(id)) node.outerHTML = spotifyEmbed(id);
+    }
+  });
+
+  const playFrom = useCallback((target: EventTarget | null): boolean => {
+    if (!(target instanceof Element)) return false;
+    const chip = target.closest<HTMLElement>("[data-spotify]");
+    const id = chip?.dataset.spotify;
+    if (!chip || !id) return false;
+    played.add(id);
+    chip.outerHTML = spotifyEmbed(id);
+    return true;
+  }, []);
 
   // The rendered markdown is injected HTML, so media clicks are caught by
   // delegation rather than per-element handlers.
@@ -246,12 +314,13 @@ export function MarkdownPreview({
   return (
     <>
       <div
+        ref={root}
         onClick={(e) => {
-          if (openFrom(e.target)) e.preventDefault();
+          if (playFrom(e.target) || openFrom(e.target)) e.preventDefault();
         }}
         onKeyDown={(e) => {
           if (e.key !== "Enter" && e.key !== " ") return;
-          if (openFrom(e.target)) e.preventDefault();
+          if (playFrom(e.target) || openFrom(e.target)) e.preventDefault();
         }}
         className={className}
       >

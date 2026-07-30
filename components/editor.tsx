@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from "react";
 
 import { MarkdownPreview } from "@/components/markdown-preview";
 import { SplitPreviewHint } from "@/components/preview-hint";
+import { useSlashMenu } from "@/components/slash-menu";
 import { fontById } from "@/lib/fonts";
 import { currentEntry, usePrefs, useWriter } from "@/lib/store";
 
@@ -76,6 +77,7 @@ export function Editor() {
 
   const ref = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  const slash = useSlashMenu(ref);
 
   useEffect(() => {
     if (previewMode !== "full") ref.current?.focus();
@@ -115,6 +117,8 @@ export function Editor() {
       }
       if (event.nativeEvent.isComposing) return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
+      // The / menu gets first refusal on Enter, Tab and Escape while it's open.
+      if (slash.handleKeyDown(event)) return;
       const el = event.currentTarget;
       if (el.selectionStart !== el.selectionEnd) return;
 
@@ -130,7 +134,7 @@ export function Editor() {
       event.preventDefault();
       applyPlan(el, plan);
     },
-    [backspaceDisabled, applyPlan]
+    [backspaceDisabled, applyPlan, slash]
   );
 
   // Keep the preview roughly in step with where the writer is in the text.
@@ -150,8 +154,12 @@ export function Editor() {
     <textarea
       ref={ref}
       value={entry.content}
-      onChange={(e) => setContent(e.target.value)}
+      onChange={(e) => {
+        setContent(e.target.value);
+        slash.sync();
+      }}
       onKeyDown={onKeyDown}
+      onBlur={slash.close}
       onScroll={previewMode === "split" ? onScroll : undefined}
       placeholder={placeholder}
       spellCheck={false}
@@ -166,7 +174,16 @@ export function Editor() {
     />
   );
 
-  if (previewMode === "off") return textarea;
+  // The menu is fixed-position, so it rides along with the textarea in either
+  // layout without caring where in the tree it sits.
+  const writing = (
+    <>
+      {textarea}
+      {slash.node}
+    </>
+  );
+
+  if (previewMode === "off") return writing;
 
   const preview = (
     <MarkdownPreview
@@ -184,7 +201,7 @@ export function Editor() {
 
   return (
     <div className="flex h-full">
-      <div className="h-full min-w-0 flex-1">{textarea}</div>
+      <div className="h-full min-w-0 flex-1">{writing}</div>
       <div className="relative hidden h-full min-w-0 flex-1 border-l md:block">
         <div ref={previewRef} className="no-scrollbar h-full overflow-y-auto">
           {preview}

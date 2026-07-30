@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { authClient } from "@/lib/auth-client";
+import { useSpotify } from "@/lib/spotify-connect";
 import { useSync } from "@/lib/sync";
 import { cn } from "@/lib/utils";
 
@@ -122,9 +123,49 @@ function SignInOptions() {
   );
 }
 
+// Spotify hangs off an account rather than being a way into one, so it lives
+// here under the email you signed in with — not among the sign-in options.
+function SpotifyAccount() {
+  const linked = useSpotify((s) => s.linked);
+  const refresh = useSpotify((s) => s.refresh);
+  const connect = useSpotify((s) => s.connect);
+  const disconnect = useSpotify((s) => s.disconnect);
+
+  useEffect(() => {
+    if (linked === null) void refresh();
+  }, [linked, refresh]);
+
+  return (
+    <>
+      <div className="my-1 h-px bg-border" />
+      {linked ? (
+        <>
+          <button className={optionClass} onClick={() => void disconnect()}>
+            Disconnect Spotify
+          </button>
+          <p className="px-1 text-xs text-muted-foreground">
+            Type / in an entry to drop in the day&apos;s song.
+          </p>
+        </>
+      ) : (
+        <>
+          <button className={optionClass} onClick={() => void connect()}>
+            Connect Spotify
+          </button>
+          <p className="px-1 text-xs text-muted-foreground">
+            Reads what you played today, nothing else, so / can add the song to
+            an entry.
+          </p>
+        </>
+      )}
+    </>
+  );
+}
+
 export function SyncPopover() {
   const status = useSync((s) => s.status);
   const user = useSync((s) => s.user);
+  const providers = useSync((s) => s.providers);
   const lastSyncAt = useSync((s) => s.lastSyncAt);
   const error = useSync((s) => s.error);
   const init = useSync((s) => s.init);
@@ -171,6 +212,7 @@ export function SyncPopover() {
             <p className="px-1 text-xs text-muted-foreground">
               Signing out keeps your writing on this device.
             </p>
+            {providers.spotify && <SpotifyAccount />}
           </div>
         ) : (
           <SignInOptions />
