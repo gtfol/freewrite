@@ -64,6 +64,8 @@ the sheet is dark if you asked for it from a dark app and light if you didn't, a
 
 the drawing itself is stored on the entry beside its text, and the text keeps a short reference to it (`![sketch](sketch:a3f1)`). strokes are tens of kilobytes of coordinates, which is the one thing that can't sit in the middle of a sentence you're still writing — so the line you see while writing stays a line, and the drawing rides along with the entry through sync and sharing. in Preview it renders as a figure; click it to open the board again. put the caret after a drawing's line and type `/` to reopen that one without Preview on.
 
+copying a drawing's reference into another entry copies the drawing with it, and the copy is its own from then on — draw on it there and the original is untouched.
+
 a downloaded entry is one markdown file with nowhere to keep a stroke list, so each drawing is embedded as an svg image instead. the file stops being editable as a drawing and starts being readable in anything that renders markdown.
 
 if you sync, apply `db/migrations/0004_entry_sketches.sql` — entries gained a `sketches` column.

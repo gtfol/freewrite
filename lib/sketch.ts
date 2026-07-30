@@ -131,6 +131,45 @@ export function putSketch(
     : [...list, sketch];
 }
 
+/**
+ * Picks up drawings a text points at that the entry doesn't carry, from
+ * wherever else they're kept. Copying a reference into another entry copies the
+ * drawing with it, which is what makes paste do what paste looks like it does.
+ *
+ * The copy belongs to the entry it lands in, so drawing on it later doesn't
+ * reach back into the entry it came from. Nothing here mutates a sketch — an
+ * edit replaces the whole record — so the two entries can share the object
+ * until one of them is drawn on.
+ *
+ * Returns `own` itself when there is nothing to pick up, so a keystroke that
+ * changes no drawings can't dirty the record.
+ */
+export function adoptSketches(
+  content: string,
+  own: Sketch[] | undefined,
+  elsewhere: Iterable<Sketch>
+): Sketch[] | undefined {
+  // Almost every keystroke lands here, and almost none of them are a paste.
+  if (!content.includes("sketch:")) return own;
+
+  const missing = referencedIds(content);
+  for (const s of own ?? []) missing.delete(s.id);
+  if (missing.size === 0) return own;
+
+  // Never past the ceiling: a record the validator rejects is one that stops
+  // syncing without saying so.
+  let room = MAX_SKETCHES - (own?.length ?? 0);
+  if (room <= 0) return own;
+
+  const found: Sketch[] = [];
+  for (const s of elsewhere) {
+    if (!missing.delete(s.id)) continue;
+    found.push(s);
+    if (--room === 0 || missing.size === 0) break;
+  }
+  return found.length ? [...(own ?? []), ...found] : own;
+}
+
 // Drops drawings the text no longer points at. Called when the writer leaves
 // the entry rather than on every keystroke: cutting a reference to paste it
 // somewhere else is a normal edit, and it shouldn't take the drawing with it.

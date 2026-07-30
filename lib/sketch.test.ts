@@ -14,6 +14,7 @@ import {
   MAX_SKETCHES,
   PAPER,
   PAPER_DARK,
+  adoptSketches,
   blankSketch,
   inkBounds,
   isDarkPaper,
@@ -108,6 +109,63 @@ test("putSketch replaces by id rather than appending a second copy", () => {
   const after = putSketch(both, edited);
   assert.equal(after.length, 2);
   assert.equal(after[0].strokes.length, 2);
+});
+
+test("adoptSketches copies a pasted drawing into the entry it landed in", () => {
+  const source = sketch({ id: "aaaa11" });
+  const pasted = `look at this ${sketchRef("aaaa11")}`;
+
+  const adopted = adoptSketches(pasted, undefined, [source]);
+  assert.deepEqual(adopted?.map((s) => s.id), ["aaaa11"]);
+  // The entry keeps what it already had, and gains the pasted one.
+  const both = adoptSketches(pasted, [sketch({ id: "bbbb22" })], [source]);
+  assert.deepEqual(both?.map((s) => s.id), ["bbbb22", "aaaa11"]);
+});
+
+test("adoptSketches leaves the list alone when there is nothing to pick up", () => {
+  const own = [sketch({ id: "aaaa11" })];
+  const elsewhere = [sketch({ id: "bbbb22" })];
+
+  // Identity, not just equality: a keystroke that changes no drawings must not
+  // dirty the record and push it again.
+  assert.equal(adoptSketches("plain prose", own, elsewhere), own);
+  assert.equal(adoptSketches(sketchRef("aaaa11"), own, elsewhere), own);
+  // Referenced but nowhere to be found — a drawing that hasn't synced down, or
+  // whose entry is gone. The figure says so rather than being invented.
+  assert.equal(adoptSketches(sketchRef("cccc33"), own, elsewhere), own);
+  assert.equal(adoptSketches("plain prose", undefined, elsewhere), undefined);
+});
+
+test("adoptSketches stops reading once it has what the text asked for", () => {
+  let read = 0;
+  function* elsewhere() {
+    for (const id of ["aaaa11", "bbbb22", "cccc33"]) {
+      read++;
+      yield sketch({ id });
+    }
+  }
+  adoptSketches(sketchRef("aaaa11"), undefined, elsewhere());
+  assert.equal(read, 1, "walked past the drawing it was looking for");
+});
+
+test("adoptSketches won't push an entry past the sketch ceiling", () => {
+  // Over the ceiling the record fails validation, and an entry that fails
+  // validation stops syncing without saying so.
+  const own = Array.from({ length: MAX_SKETCHES }, (_, i) =>
+    sketch({ id: `own${String(i).padStart(3, "0")}` })
+  );
+  const content = `${sketchRef("aaaa11")} ${sketchRef("bbbb22")}`;
+  assert.equal(
+    adoptSketches(content, own, [sketch({ id: "aaaa11" })]),
+    own
+  );
+
+  const nearly = own.slice(0, MAX_SKETCHES - 1);
+  const adopted = adoptSketches(content, nearly, [
+    sketch({ id: "aaaa11" }),
+    sketch({ id: "bbbb22" }),
+  ]);
+  assert.equal(adopted?.length, MAX_SKETCHES);
 });
 
 test("pruneSketches drops drawings the text no longer points at", () => {

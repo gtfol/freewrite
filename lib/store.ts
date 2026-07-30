@@ -12,7 +12,7 @@ import {
 } from "@/lib/entries";
 import { DEFAULT_FONT_ID, DEFAULT_FONT_SIZE } from "@/lib/fonts";
 import { clearShareRecord, getShareRecord } from "@/lib/shares";
-import { pruneSketches, putSketch } from "@/lib/sketch";
+import { adoptSketches, pruneSketches, putSketch } from "@/lib/sketch";
 import type { Entry, Sketch } from "@/lib/types";
 
 // Preview cycles rather than toggles: writing only, writing beside the
@@ -228,6 +228,30 @@ function editCurrent(edit: (entry: Entry) => Entry) {
   saveTimeout = setTimeout(flushPending, 400);
 }
 
+// Every drawing on every other entry, lazily — adoptSketches stops reading as
+// soon as it has what the text asked for, so a paste doesn't walk the history.
+function* sketchesElsewhere(currentId: string): Generator<Sketch> {
+  for (const entry of useWriter.getState().entries) {
+    if (entry.id === currentId) continue;
+    for (const sketch of entry.sketches ?? []) yield sketch;
+  }
+}
+
+// A reference the entry doesn't have a drawing for, when another entry does:
+// somebody pasted it, so take a copy. Also catches the reference that arrived
+// before its drawing did — a paste on one device, opened on another.
+function adoptCurrent() {
+  const { entries, currentId } = useWriter.getState();
+  const entry = entries.find((e) => e.id === currentId);
+  if (!entry) return;
+  const adopted = adoptSketches(
+    entry.content,
+    entry.sketches,
+    sketchesElsewhere(entry.id)
+  );
+  if (adopted !== entry.sketches) editCurrent((e) => ({ ...e, sketches: adopted }));
+}
+
 // Drawings the text no longer points at go when the writer leaves the entry,
 // rather than the moment the reference disappears: cutting one to paste it
 // further down is an ordinary edit, and it mustn't take the drawing with it.
@@ -300,7 +324,18 @@ export const useWriter = create<WriterState>()((set, get) => ({
   },
 
   setContent: (content) => {
-    editCurrent((e) => ({ ...e, content }));
+    const { currentId } = get();
+    editCurrent((e) => ({
+      ...e,
+      content,
+      // A pasted reference brings its drawing along, in the same edit that
+      // pasted it — so the figure is there rather than appearing a beat later.
+      sketches: adoptSketches(
+        content,
+        e.sketches,
+        sketchesElsewhere(currentId ?? "")
+      ),
+    }));
   },
 
   // Every finished stroke lands here, so a drawing saves the way typing does
@@ -338,6 +373,7 @@ export const useWriter = create<WriterState>()((set, get) => ({
     flushPending();
     rememberEntry(id);
     set({ currentId: id });
+    adoptCurrent();
   },
 
   remove: async (id) => {
