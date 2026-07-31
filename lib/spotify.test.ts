@@ -8,8 +8,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  dayOf,
   pickSongOfDay,
   playsFrom,
+  reachesDay,
   splitLabel,
   trackIdFrom,
   trackMarkdown,
@@ -18,6 +20,9 @@ import {
 
 const MIDNIGHT = Date.parse("2026-07-29T00:00:00Z");
 const hour = (h: number) => MIDNIGHT + h * 3_600_000;
+// Built by hand rather than through dayOf, so the tests don't move with the
+// timezone the suite happens to run in.
+const DAY = { start: MIDNIGHT, end: hour(24) };
 
 function play(name: string, at: number): Play {
   return {
@@ -29,7 +34,7 @@ function play(name: string, at: number): Play {
 test("pickSongOfDay counts plays and returns the most played", () => {
   const song = pickSongOfDay(
     [play("Nights", hour(9)), play("Pyramids", hour(10)), play("Nights", hour(11))],
-    MIDNIGHT
+    DAY
   );
   assert.equal(song?.track.name, "Nights");
   assert.equal(song?.plays, 2);
@@ -41,7 +46,7 @@ test("pickSongOfDay counts plays and returns the most played", () => {
 test("pickSongOfDay breaks an all-single-play tie by most recent", () => {
   const song = pickSongOfDay(
     [play("Nights", hour(8)), play("Pyramids", hour(15)), play("Ivy", hour(12))],
-    MIDNIGHT
+    DAY
   );
   assert.equal(song?.track.name, "Pyramids");
   assert.equal(song?.plays, 1);
@@ -50,25 +55,89 @@ test("pickSongOfDay breaks an all-single-play tie by most recent", () => {
 test("pickSongOfDay prefers play count over recency", () => {
   const song = pickSongOfDay(
     [play("Nights", hour(1)), play("Nights", hour(2)), play("Ivy", hour(23))],
-    MIDNIGHT
+    DAY
   );
   assert.equal(song?.track.name, "Nights");
 });
 
-// The window reaches back past midnight, so yesterday's plays arrive in the
-// same payload. Counting them would let last night outvote today.
+// The window reaches back past midnight, so the day before arrives in the same
+// payload. Counting it would let the previous night outvote the entry's day.
 test("pickSongOfDay ignores plays from before the day started", () => {
   const song = pickSongOfDay(
-    [play("Yesterday", hour(-4)), play("Yesterday", hour(-3)), play("Today", hour(7))],
-    MIDNIGHT
+    [play("Before", hour(-4)), play("Before", hour(-3)), play("During", hour(7))],
+    DAY
   );
-  assert.equal(song?.track.name, "Today");
+  assert.equal(song?.track.name, "During");
   assert.equal(song?.considered, 1);
 });
 
-test("pickSongOfDay returns null when nothing played today", () => {
-  assert.equal(pickSongOfDay([play("Yesterday", hour(-2))], MIDNIGHT), null);
-  assert.equal(pickSongOfDay([], MIDNIGHT), null);
+// The reason the window has a far edge at all: writing up yesterday's entry
+// this morning must not pick up anything played since. Today's four plays lose
+// to yesterday's one, because today isn't the entry's day.
+test("pickSongOfDay ignores plays from after the day ended", () => {
+  const song = pickSongOfDay(
+    [
+      play("During", hour(21)),
+      play("After", hour(25)),
+      play("After", hour(26)),
+      play("After", hour(27)),
+      play("After", hour(28)),
+    ],
+    DAY
+  );
+  assert.equal(song?.track.name, "During");
+  assert.equal(song?.considered, 1);
+});
+
+// Midnight belongs to the day it starts, not the one it ends.
+test("pickSongOfDay puts each edge of the day on one side only", () => {
+  assert.equal(pickSongOfDay([play("Start", DAY.start)], DAY)?.track.name, "Start");
+  assert.equal(pickSongOfDay([play("End", DAY.end)], DAY), null);
+});
+
+test("pickSongOfDay returns null when nothing played that day", () => {
+  assert.equal(pickSongOfDay([play("Before", hour(-2))], DAY), null);
+  assert.equal(pickSongOfDay([], DAY), null);
+});
+
+test("dayOf spans the local day the timestamp falls in", () => {
+  const noon = Date.now();
+  const day = dayOf(noon);
+  assert.ok(day.start <= noon && noon < day.end);
+  assert.equal(new Date(day.start).getHours(), 0);
+  assert.equal(new Date(day.start).getMinutes(), 0);
+  assert.equal(new Date(day.end).getHours(), 0);
+  // A day is 24 hours give or take the hour the clocks move.
+  const span = day.end - day.start;
+  assert.ok(span >= 23 * 3_600_000 && span <= 25 * 3_600_000, `span ${span}`);
+});
+
+test("dayOf gives one entry's whole day and nothing of the next", () => {
+  const morning = dayOf(Date.parse("2026-07-29T09:00:00"));
+  const evening = dayOf(Date.parse("2026-07-29T23:30:00"));
+  assert.deepEqual(morning, evening);
+  assert.equal(dayOf(morning.end).start, morning.end);
+});
+
+// The whole point of the distinction: a day older than the window is a day we
+// have nothing to say about, and answering "nothing played" would be a lie
+// that reads exactly like the truth.
+test("reachesDay is false for a day that ended before the window starts", () => {
+  const plays = [play("Nights", hour(30)), play("Ivy", hour(40))];
+  assert.equal(reachesDay(plays, DAY), false);
+});
+
+test("reachesDay is true while any of the window falls inside the day", () => {
+  assert.equal(reachesDay([play("Nights", hour(23))], DAY), true);
+  // Only the tail of the day survives in the window — partial, but reachable,
+  // and `considered` is what says how partial.
+  assert.equal(reachesDay([play("Nights", hour(23)), play("Ivy", hour(30))], DAY), true);
+});
+
+// No play history at all is an answer about every day, not a window that fell
+// short of one.
+test("reachesDay is true when there is no history at all", () => {
+  assert.equal(reachesDay([], DAY), true);
 });
 
 test("trackIdFrom reads every shape a track link arrives in", () => {

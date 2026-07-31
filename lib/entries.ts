@@ -42,8 +42,12 @@ const dateFormat = new Intl.DateTimeFormat("en-US", {
   day: "numeric",
 });
 
+export function shortDate(timestamp: number): string {
+  return dateFormat.format(new Date(timestamp));
+}
+
 export function entryDate(entry: Entry): string {
-  return dateFormat.format(new Date(entry.createdAt));
+  return shortDate(entry.createdAt);
 }
 
 export function entryPreview(entry: Entry): string {

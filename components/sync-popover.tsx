@@ -153,8 +153,8 @@ function SpotifyAccount() {
             Connect Spotify
           </button>
           <p className="px-1 text-xs text-muted-foreground">
-            Reads what you played today, nothing else, so / can add the song to
-            an entry.
+            Reads what you played recently, nothing else, so / can add an
+            entry&apos;s song for the day it was written.
           </p>
         </>
       )}

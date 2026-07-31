@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 
 import { getAuth } from "@/lib/server/auth";
 import {
+  type Day,
   HISTORY_LIMIT,
   pickSongOfDay,
   playsFrom,
+  reachesDay,
   type SongOfDayResponse,
 } from "@/lib/spotify";
 
@@ -13,18 +15,35 @@ export const runtime = "nodejs";
 const HISTORY_URL = `https://api.spotify.com/v1/me/player/recently-played?limit=${HISTORY_LIMIT}`;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+// A local day is 24 hours give or take an hour, on the two days a year the
+// clocks move.
+const SHORTEST_DAY = 23 * 60 * 60 * 1000;
+const LONGEST_DAY = 25 * 60 * 60 * 1000;
 
-// Today is the writer's today, so the client sends its own midnight rather
-// than the server guessing at a timezone. A week back is already far more
-// history than the 50-play window can hold, so anything beyond that — or in
-// the future — is a broken clock, not a timezone, and falls back to 24 hours.
-function dayStart(request: Request): number {
-  const since = Number(new URL(request.url).searchParams.get("since"));
+// The day belongs to the entry, and its edges belong to the writer's timezone,
+// which the server can't work out — so the browser sends both and this only
+// checks they describe a plausible day. A day that hasn't started yet, or one
+// that isn't a day long, is a broken clock rather than a timezone, and falls
+// back to the last 24 hours.
+//
+// How far back the day is isn't checked here: an old day is a perfectly valid
+// question, and the honest answer to it comes from `reachesDay`.
+function dayFrom(request: Request): Day {
+  const params = new URL(request.url).searchParams;
+  const start = Number(params.get("since"));
+  const end = Number(params.get("until"));
   const now = Date.now();
-  if (!Number.isFinite(since) || since > now || now - since > 7 * DAY_MS) {
-    return now - DAY_MS;
+  const span = end - start;
+  if (
+    !Number.isFinite(start) ||
+    !Number.isFinite(end) ||
+    start > now ||
+    span < SHORTEST_DAY ||
+    span > LONGEST_DAY
+  ) {
+    return { start: now - DAY_MS, end: Infinity };
   }
-  return since;
+  return { start, end };
 }
 
 function json(body: SongOfDayResponse, status = 200) {
@@ -87,6 +106,10 @@ export async function GET(request: Request) {
     return json({ state: "error", message: `Spotify said ${res.status}` }, 502);
   }
 
-  const song = pickSongOfDay(playsFrom(await res.json()), dayStart(request));
+  const day = dayFrom(request);
+  const plays = playsFrom(await res.json());
+  if (!reachesDay(plays, day)) return json({ state: "out-of-reach" });
+
+  const song = pickSongOfDay(plays, day);
   return song ? json({ state: "ok", song }) : json({ state: "empty" });
 }

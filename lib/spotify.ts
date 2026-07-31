@@ -1,12 +1,18 @@
 // Song of the day: the pure half. What a track is, how it lands in an entry,
-// and how "most played today" gets decided. No DOM, no fetch, no React — the
-// route handler, the preview renderer and the tests all read from here.
+// and how "most played that day" gets decided. No DOM, no fetch, no React —
+// the route handler, the preview renderer and the tests all read from here.
+//
+// The day in question is the entry's, not the clock's: writing up Sunday on
+// Monday morning should still get Sunday's song. Which means the window has
+// two edges, and how far back it can be asked about is a real limit rather
+// than a hypothetical one.
 //
 // The one thing worth knowing before reading further: Spotify's play history
 // is a rolling window of the last 50 plays and cannot be paged past. There is
-// no endpoint for "what did I play today" and no daily range on top-tracks
-// (the shortest is ~4 weeks), so today's plays are whatever part of today
-// survives inside those 50 items.
+// no endpoint for "what did I play on the 3rd" and no daily range on top-tracks
+// (the shortest is ~4 weeks), so a day's plays are whatever part of that day
+// survives inside those 50 items — and an old enough day survives in none of
+// it.
 
 export const RECENTLY_PLAYED_SCOPE = "user-read-recently-played";
 
@@ -28,21 +34,60 @@ export interface Play {
 export interface SongOfDay {
   track: SpotifyTrack;
   plays: number;
-  // Today's plays we could see at all. With the window only 50 deep this is
+  // The day's plays we could see at all. With the window only 50 deep this is
   // the honest denominator behind `plays` — the UI uses it to stay truthful
   // about a one-play "winner".
   considered: number;
 }
 
-// Most plays today wins; a tie goes to whichever was played most recently. On
-// a light listening day everything ties at one play and this is really "the
+// One writer's day, half-open. Only the browser can work this out: the server
+// has no idea what timezone an entry was written in, so both edges travel with
+// the request rather than the server guessing at midnight.
+export interface Day {
+  start: number;
+  end: number;
+}
+
+// The local day a timestamp falls in. Built by walking the calendar rather
+// than adding 24 hours, so the day the clocks change is still one day.
+export function dayOf(timestamp: number): Day {
+  const start = new Date(timestamp);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { start: start.getTime(), end: end.getTime() };
+}
+
+// Whether the 50-play window still reaches the far side of a day. Those plays
+// cover everything from the oldest of them until now and nothing before it, so
+// a day that had already ended by then was never in the window at all. It
+// yields no plays for exactly the same reason a quiet day does, and calling
+// both of them "nothing played" would tell a writer they listened to nothing
+// on a day we simply cannot see.
+//
+// An empty window is the exception: no play history at all is an answer about
+// every day, not a window that fell short of one.
+export function reachesDay(plays: Play[], day: Day): boolean {
+  if (plays.length === 0) return true;
+  let oldest = Infinity;
+  for (const play of plays) oldest = Math.min(oldest, play.playedAt);
+  return day.end > oldest;
+}
+
+// Most plays that day wins; a tie goes to whichever was played most recently.
+// On a light listening day everything ties at one play and this is really "the
 // last thing you played" — `plays` says so, rather than the caller guessing.
-export function pickSongOfDay(plays: Play[], since: number): SongOfDay | null {
-  const today = plays.filter((p) => p.playedAt >= since);
-  if (today.length === 0) return null;
+export function pickSongOfDay(plays: Play[], day: Day): SongOfDay | null {
+  // Both edges matter, not just the near one: the window reaches past an old
+  // entry's day in both directions, and everything since is another day's
+  // listening.
+  const during = plays.filter(
+    (p) => p.playedAt >= day.start && p.playedAt < day.end
+  );
+  if (during.length === 0) return null;
 
   const tallies = new Map<string, { track: SpotifyTrack; plays: number; latest: number }>();
-  for (const play of today) {
+  for (const play of during) {
     const seen = tallies.get(play.track.id);
     if (seen) {
       seen.plays += 1;
@@ -67,7 +112,7 @@ export function pickSongOfDay(plays: Play[], since: number): SongOfDay | null {
     }
   }
 
-  return { track: best!.track, plays: best!.plays, considered: today.length };
+  return { track: best!.track, plays: best!.plays, considered: during.length };
 }
 
 // Track ids are 22 base62 characters. Share links carry a ?si= tracking param
@@ -125,8 +170,11 @@ export function splitLabel(text: string): { title: string; sub: string } {
 // Shape of the /api/spotify/song response, shared by the route and the store.
 export type SongOfDayResponse =
   | { state: "ok"; song: SongOfDay }
-  // Signed in, Spotify connected, but nothing played since midnight.
+  // Signed in, Spotify connected, but nothing played on the entry's day.
   | { state: "empty" }
+  // The entry's day is older than the 50-play window reaches back. Distinct
+  // from "empty" on purpose: this one is "can't know", not "nothing".
+  | { state: "out-of-reach" }
   | { state: "unlinked" }
   // Connected once, but the token no longer works — revoked access, or an
   // account linked before this app started asking for the history scope.
