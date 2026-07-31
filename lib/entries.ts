@@ -119,33 +119,27 @@ now, new entry. timer. go.
 
 export const WELCOME_CONTENT = `hi. welcome to freewrite.
 
-a timer, and a page. fifteen minutes without stopping — that's all of it.
+a timer, and a page — that's all of it. fifteen minutes without stopping, and when you're ready, fullscreen and then the timer.
 
-when you're ready: fullscreen, then the timer.
+a typo shows up early and the hand moves to fix it on its own. leave it there. if the hand won't listen, there's a toggle at the bottom that takes the backspace key away for you, and mine doesn't listen either.
 
-a typo will show up early. the hand moves to fix it on its own. better to leave it there. if the hand won't listen, there's a toggle at the bottom that takes backspace away for you — mine doesn't listen either.
+somewhere around minute four the words run out. this happens to everyone. writing "i don't know what to say" is still writing, and something usually follows it — a half thought, an old argument, the thing you've been circling all week without looking straight at — and then you're somewhere you hadn't planned to go, and the time is gone.
 
-somewhere around minute four the words run out. this happens to everyone. "i don't know what to say" is also writing, and something usually follows it. the topic will drift too, and often that's where it was headed anyway.
+let it drift. that's usually where it was headed anyway.
 
-fifteen is longer than it sounds. the timer scrolls down to five, and five is enough. three mornings in a row and you'll see why people have kept at this since 1973.
+fifteen is longer than it sounds, so the timer scrolls down to five, and five is enough to begin with. three mornings in a row and you'll see why people have kept at this since 1973.
 
 if a starting point helps: "what am i working on today? why is that the most important thing for me to work on?"
 
-the bar fades back when the time is up. nothing more to do — you can stop.
+the bar fades back when the time is up. you can stop.
 
-afterwards, the writing stays.
+afterwards the writing stays, which is the part nobody expects — the clock in the corner holds all of it, here in this browser, and signing in lets it follow you to whatever desk or phone you end up writing from next.
 
-the clock in the corner keeps all of it. it lives in this browser, and signing in lets it follow you to wherever you write next.
+"chat" passes an entry to chatgpt or claude with the prompt already written, for the days you can't quite tell what you said. "share" makes a link, for the rare one meant for someone else. "preview" renders it properly, for when a session quietly turns into something you're building.
 
-"chat" passes an entry to chatgpt or claude with the prompt already written, for the days you can't quite tell what you said.
+"read" is the other half of this place: a link pasted in and stripped of its mess, read on the page or read aloud to you. "/" while writing opens the smaller things, and more arrive there in time.
 
-"share" makes a link, for the rare one meant for someone else. "preview" renders it properly, for when a session quietly becomes something you're building.
-
-"read" is the other half of this place — a link pasted in, read without the mess, or read aloud to you.
-
-"/" while writing opens the smaller things. more arrive there in time.
-
-the font is worth a moment. lato, large, when it's raw. serif at 18 when it's an idea. "random" until something fits.
+the font is worth a moment — lato, large, when it's raw, serif at 18 when it's an idea, "random" until something fits.
 
 there's no spellcheck. that was on purpose.
 
