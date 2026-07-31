@@ -10,9 +10,17 @@
 // The one thing worth knowing before reading further: Spotify's play history
 // is a rolling window of the last 50 plays and cannot be paged past. There is
 // no endpoint for "what did I play on the 3rd" and no daily range on top-tracks
-// (the shortest is ~4 weeks), so a day's plays are whatever part of that day
-// survives inside those 50 items — and an old enough day survives in none of
-// it.
+// (the shortest is ~4 weeks). Fifty plays is about three hours of listening, so
+// on the API alone a day's plays are whatever part of that day survives inside
+// the window — and an old enough day, or a day you listened through, survives
+// in none of it.
+//
+// So the deployment keeps its own record instead. A cron polls the window every
+// half hour and writes it to `spotify_plays`, which accumulates into the history
+// the API won't serve; the route reads that and merges the live window on top
+// for the plays since the last poll. Everything here stays pure and works the
+// same on either source — what changed is how far back the floor sits, not what
+// a day means.
 
 export const RECENTLY_PLAYED_SCOPE = "user-read-recently-played";
 
@@ -58,20 +66,44 @@ export function dayOf(timestamp: number): Day {
   return { start: start.getTime(), end: end.getTime() };
 }
 
-// Whether the 50-play window still reaches the far side of a day. Those plays
-// cover everything from the oldest of them until now and nothing before it, so
-// a day that had already ended by then was never in the window at all. It
-// yields no plays for exactly the same reason a quiet day does, and calling
-// both of them "nothing played" would tell a writer they listened to nothing
-// on a day we simply cannot see.
+// The oldest moment the history covers, across both places it comes from: the
+// archive the cron has built up, and the live window on top of it. Null means
+// there is no history at all — a writer who has never played anything, or an
+// account connected a moment ago.
+export function historyFloor(archive: number | null, live: Play[]): number | null {
+  let floor = archive;
+  for (const play of live) {
+    if (floor === null || play.playedAt < floor) floor = play.playedAt;
+  }
+  return floor;
+}
+
+// Whether the history reaches the far side of a day. It covers everything from
+// its oldest play until now and nothing before, so a day that had already ended
+// by then was never recorded at all. It yields no plays for exactly the same
+// reason a quiet day does, and calling both of them "nothing played" would tell
+// a writer they listened to nothing on a day we simply cannot see.
 //
-// An empty window is the exception: no play history at all is an answer about
-// every day, not a window that fell short of one.
-export function reachesDay(plays: Play[], day: Day): boolean {
-  if (plays.length === 0) return true;
-  let oldest = Infinity;
-  for (const play of plays) oldest = Math.min(oldest, play.playedAt);
-  return day.end > oldest;
+// No history at all is the exception: that is an answer about every day, not a
+// record that fell short of one.
+//
+// Before the archive existed this took the live 50 and asked the same question
+// of them. The floor is just further back now — it moves back to the day the
+// cron first polled, instead of sitting three hours behind the present.
+export function reachesDay(floor: number | null, day: Day): boolean {
+  if (floor === null) return true;
+  return day.end > floor;
+}
+
+// The archive and the live window overlap on purpose — the cron cannot run
+// often enough to make the live call redundant, and a fresh connection has
+// nothing but the live call. A play is identified by the moment it started, so
+// the overlap collapses on `playedAt` and the result comes back in order.
+export function mergePlays(archived: Play[], live: Play[]): Play[] {
+  const byTime = new Map<number, Play>();
+  for (const play of archived) byTime.set(play.playedAt, play);
+  for (const play of live) byTime.set(play.playedAt, play);
+  return [...byTime.values()].sort((a, b) => a.playedAt - b.playedAt);
 }
 
 // Most plays that day wins; a tie goes to whichever was played most recently.

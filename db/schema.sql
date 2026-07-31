@@ -98,3 +98,16 @@ create table if not exists sketches (
   hash text not null default ''
 );
 create index if not exists sketches_user_seq on sketches (user_id, seq);
+
+-- the play history spotify won't keep. it serves reads only from this
+-- deployment, so it carries no seq/hash: nothing about it syncs to a client.
+create table if not exists spotify_plays (
+  user_id text not null references "user" (id) on delete cascade,
+  played_at bigint not null,
+  track_id text not null,
+  name text not null,
+  artist text not null,
+  primary key (user_id, played_at)
+);
+create index if not exists spotify_plays_user_time
+  on spotify_plays (user_id, played_at desc);

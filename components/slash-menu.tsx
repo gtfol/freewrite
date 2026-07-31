@@ -242,9 +242,9 @@ export function useSlashMenu(
         setNote(`Nothing played ${when}.`);
         return;
       case "out-of-reach":
-        // Nothing to offer and nothing to fix — Spotify keeps 50 plays and
-        // this entry's day fell off the back of them.
-        setNote("That day is further back than Spotify remembers.");
+        // Nothing to offer and nothing to fix. The record only starts when
+        // Spotify was connected, and this entry's day is older than that.
+        setNote("That day is from before your listening was being recorded.");
         return;
       case "unlinked":
         setNote("Connect Spotify to use this.");
@@ -291,7 +291,7 @@ export function useSlashMenu(
   } else if (song?.state === "empty") {
     songHint = `nothing played ${when}`;
   } else if (song?.state === "out-of-reach") {
-    songHint = "further back than Spotify remembers";
+    songHint = "from before your listening was recorded";
   } else if (song?.state === "reconnect") {
     songLabel = "Reconnect Spotify";
     songHint = "access expired";

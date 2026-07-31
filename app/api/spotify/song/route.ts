@@ -2,9 +2,17 @@ import { NextResponse } from "next/server";
 
 import { getAuth } from "@/lib/server/auth";
 import {
+  archiveFloor,
+  playsOnDay,
+  recordPlays,
+} from "@/lib/server/plays";
+import {
   type Day,
   HISTORY_LIMIT,
+  historyFloor,
+  mergePlays,
   pickSongOfDay,
+  type Play,
   playsFrom,
   reachesDay,
   type SongOfDayResponse,
@@ -50,6 +58,17 @@ function json(body: SongOfDayResponse, status = 200) {
   return NextResponse.json(body, { status });
 }
 
+// Whether the live window can still add anything the archive doesn't have.
+//
+// It can, in two cases. A day that is still running, or only just over, has
+// plays from after the last poll — up to half an hour of them. And a writer
+// whose record is empty has just connected, so the live window is the only
+// history there is. Every other day is settled: the cron saw it in full, and
+// the call would be a round trip that returns other days' listening.
+function needsLive(day: Day, floor: number | null, now: number): boolean {
+  return floor === null || day.end > now - DAY_MS;
+}
+
 // The Spotify token stays here. The browser gets a track name and an id — the
 // same thing it would get off a share link — and never the credential.
 export async function GET(request: Request) {
@@ -83,33 +102,55 @@ export async function GET(request: Request) {
   }
   if (!token) return json({ state: "unlinked" });
 
-  let res: Response;
-  try {
-    res = await fetch(HISTORY_URL, {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: "no-store",
-    });
-  } catch {
-    return json({ state: "error", message: "Couldn't reach Spotify" }, 502);
-  }
-
-  // 401 means the refreshed token was rejected anyway; 403 usually means the
-  // account was linked before this app asked for the history scope. Both are
-  // fixed by connecting again.
-  if (res.status === 401 || res.status === 403) {
-    return json({ state: "reconnect" });
-  }
-  if (res.status === 429) {
-    return json({ state: "error", message: "Spotify is rate limiting — try again shortly" }, 429);
-  }
-  if (!res.ok) {
-    return json({ state: "error", message: `Spotify said ${res.status}` }, 502);
-  }
-
   const day = dayFrom(request);
-  const plays = playsFrom(await res.json());
-  if (!reachesDay(plays, day)) return json({ state: "out-of-reach" });
+  const userId = session.user.id;
 
-  const song = pickSongOfDay(plays, day);
+  // The record first: for any day the cron has covered this is the whole
+  // answer, and it reaches back as far as the writer has been connected rather
+  // than three hours.
+  const [archived, floor] = await Promise.all([
+    playsOnDay(userId, day),
+    archiveFloor(userId),
+  ]);
+
+  let live: Play[] = [];
+  if (needsLive(day, floor, Date.now())) {
+    let res: Response;
+    try {
+      res = await fetch(HISTORY_URL, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+    } catch {
+      return json({ state: "error", message: "Couldn't reach Spotify" }, 502);
+    }
+
+    // 401 means the refreshed token was rejected anyway; 403 usually means the
+    // account was linked before this app asked for the history scope. Both are
+    // fixed by connecting again.
+    if (res.status === 401 || res.status === 403) {
+      return json({ state: "reconnect" });
+    }
+    if (res.status === 429) {
+      return json({ state: "error", message: "Spotify is rate limiting — try again shortly" }, 429);
+    }
+    if (!res.ok) {
+      return json({ state: "error", message: `Spotify said ${res.status}` }, 502);
+    }
+
+    live = playsFrom(await res.json());
+    // Asking for the day's song is itself a poll, and a free one. It matters
+    // most for the writer who connected a minute ago: it gets their first
+    // plays into the record without waiting on the cron. Failing to write is
+    // not worth failing the request over — the answer below doesn't depend on
+    // it, and the next poll will record the same plays anyway.
+    await recordPlays(userId, live).catch(() => {});
+  }
+
+  if (!reachesDay(historyFloor(floor, live), day)) {
+    return json({ state: "out-of-reach" });
+  }
+
+  const song = pickSongOfDay(mergePlays(archived, live), day);
   return song ? json({ state: "ok", song }) : json({ state: "empty" });
 }
