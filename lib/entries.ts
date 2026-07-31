@@ -71,7 +71,9 @@ export function isWelcomeEntry(content: string): boolean {
   return content.trimStart().toLowerCase().startsWith(WELCOME_PREFIX);
 }
 
-export const WELCOME_CONTENT = `hi. welcome to freewrite.
+// The wording every device seeded before the guide was rewritten. Kept so a
+// pristine old guide is still recognised as the guide — see isPristineWelcome.
+const LEGACY_WELCOME_CONTENT = `hi. welcome to freewrite.
 
 this is not a journaling app or a note-taking app. it's a tool purely to help you freewrite.
 
@@ -114,3 +116,48 @@ freewrite is an open-source mac app by farza (github.com/farzaa/freewrite). this
 
 now, new entry. timer. go.
 `;
+
+export const WELCOME_CONTENT = `hi. welcome to freewrite.
+
+freewriting is a writing strategy from 1973: write continuously for a set time without worrying about grammar, spelling, or anything like that. a pure stream of consciousness.
+
+a timer, no backspaces, and nothing else on the screen. that's the part worth protecting, and it's what the rest of this is built around.
+
+1. think of a topic (a breakup, a struggle at work, a new idea)
+2. click fullscreen
+3. click the timer
+4. start writing. don't stop.
+
+once the timer is done, the bar will fade back in — and you'll know to stop.
+
+the rules: no backspaces (there's a toggle at the bottom that enforces it), no fixing spelling, no staying on topic. little 5-10s breaks are fine, but try not to stop typing. no judgment. trust your mind.
+
+if 15 minutes sounds scary, scroll on the timer to shorten it. start with 5.
+
+a prompt that works: "what am i working on today? why is that the most important thing for me to work on?" — 15 minutes, 3 days straight.
+
+then the timer stops, and what you wrote is still here. that half matters too:
+
+- the clock, bottom right, is everything you've written. it lives in this browser, and signing in brings it with you to any device you write on.
+- "chat" hands an entry to chatgpt or claude with a prompt baked in. ai is good at connections you won't see.
+- "share" turns an entry into a link. "preview" renders it as markdown, for when a session turns into something you're actually building.
+- "read" is for everything you didn't write: paste a link, read it without the noise, or have it read out loud to you.
+- type "/" mid-sentence. that's where the stranger features live, and where new ones show up.
+
+the font should match the mood — larger lato when it's emotional, 18px serif when it's an idea. "random" finds it faster than you will.
+
+there's no spellcheck. that one's on purpose.
+
+freewrite is an open-source mac app by farza (github.com/farzaa/freewrite). this is the web version.
+
+now, new entry. timer. go.
+`;
+
+// A guide nobody has touched yet, in either wording. Sync leans on this to
+// leave the seeded guide alone; the moment it's edited it stops matching and
+// becomes writing like anything else.
+const PRISTINE_WELCOMES = new Set([WELCOME_CONTENT, LEGACY_WELCOME_CONTENT]);
+
+export function isPristineWelcome(content: string): boolean {
+  return PRISTINE_WELCOMES.has(content);
+}

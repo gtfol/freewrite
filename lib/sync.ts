@@ -23,7 +23,7 @@ import {
   setOnLocalChange,
   type Collection,
 } from "@/lib/db";
-import { createEntry, WELCOME_CONTENT } from "@/lib/entries";
+import { createEntry, isPristineWelcome } from "@/lib/entries";
 import { articleHash, entryHash, rootDigest, sketchHash } from "@/lib/hash";
 import { useSpotify } from "@/lib/spotify-connect";
 import { useWriter } from "@/lib/store";
@@ -81,7 +81,7 @@ function saveCursors(userId: string, cursors: Cursors) {
 function isJunkEntry(entry: Entry): boolean {
   return (
     !entry.deletedAt &&
-    (entry.content === WELCOME_CONTENT || !entry.content.trim())
+    (isPristineWelcome(entry.content) || !entry.content.trim())
   );
 }
 
