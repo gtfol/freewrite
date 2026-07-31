@@ -16,7 +16,9 @@ create table if not exists spotify_plays (
 -- one account plays one track at a time, so (user, played_at) is the play. that
 -- is what makes polling free to overlap: consecutive windows repeat almost
 -- everything they contain and the primary key drops the repeats.
-
--- the day lookup is a range scan over one user's plays, newest first.
-create index if not exists spotify_plays_user_time
-  on spotify_plays (user_id, played_at desc);
+--
+-- and it is the only index this table needs. both reads are a range scan over
+-- one writer's plays — the day lookup and the oldest-play floor — and the
+-- primary key already covers (user_id, played_at) in that order. a descending
+-- index for the floor would be dead weight: postgres walks a btree backwards
+-- just as happily, and the planner ignores the duplicate when offered one.
