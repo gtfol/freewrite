@@ -119,38 +119,41 @@ now, new entry. timer. go.
 
 export const WELCOME_CONTENT = `hi. welcome to freewrite.
 
-freewriting is a writing strategy from 1973: write continuously for a set time without worrying about grammar, spelling, or anything like that. a pure stream of consciousness.
+here's what's about to happen. you'll pick something that's been sitting on you — a breakup, a thing at work, an idea you can't shake — and you'll write about it for fifteen minutes without stopping.
 
-a timer, no backspaces, and nothing else on the screen. that's the part worth protecting, and it's what the rest of this is built around.
+not "without stopping much." without stopping.
 
-1. think of a topic (a breakup, a struggle at work, a new idea)
-2. click fullscreen
-3. click the timer
-4. start writing. don't stop.
+go fullscreen. start the timer. go.
 
-once the timer is done, the bar will fade back in — and you'll know to stop.
+about two minutes in you'll make a typo and your hand will move to fix it. don't. that reflex is the whole thing we're getting around here. there's a toggle at the bottom that takes the backspace key away entirely, if you don't trust yourself. i don't trust myself.
 
-the rules: no backspaces (there's a toggle at the bottom that enforces it), no fixing spelling, no staying on topic. little 5-10s breaks are fine, but try not to stop typing. no judgment. trust your mind.
+around minute four you'll run out of things to say. everyone does. write "i don't know what to say" over and over until something comes, because it always comes. and don't stay on topic — wander. the wandering is where the good stuff is hiding.
 
-if 15 minutes sounds scary, scroll on the timer to shorten it. start with 5.
+fifteen minutes feels long because it is. scroll on the timer to make it five. five is a real session — do that three days straight and you'll see why people have been at this since 1973.
 
-a prompt that works: "what am i working on today? why is that the most important thing for me to work on?" — 15 minutes, 3 days straight.
+somewhere to start, if you need one: "what am i working on today? why is that the most important thing for me to work on?"
 
-then the timer stops, and what you wrote is still here. that half matters too:
+when the time's up the bar fades back in. that's your cue. stop.
 
-- the clock, bottom right, is everything you've written. it lives in this browser, and signing in brings it with you to any device you write on.
-- "chat" hands an entry to chatgpt or claude with a prompt baked in. ai is good at connections you won't see.
-- "share" turns an entry into a link. "preview" renders it as markdown, for when a session turns into something you're actually building.
-- "read" is for everything you didn't write: paste a link, read it without the noise, or have it read out loud to you.
-- type "/" mid-sentence. that's where the stranger features live, and where new ones show up.
+then the part nobody expects: what you wrote is still sitting there.
 
-the font should match the mood — larger lato when it's emotional, 18px serif when it's an idea. "random" finds it faster than you will.
+the clock in the corner holds all of it. it lives in this browser, and if you sign in it comes with you — laptop, phone, wherever you end up writing next.
 
-there's no spellcheck. that one's on purpose.
+when you finish one and can't quite tell what you just said, hit "chat". it hands the entry to chatgpt or claude with the prompt already written, and it's good at catching the thing you circled three times without noticing.
+
+"share" turns an entry into a link, for the rare one someone else should read. "preview" renders it properly, for when a session stops being a session and turns into something you're building.
+
+"read" is the other half of this place: paste a link, read it without the mess, or sit back and have it read to you.
+
+and type "/" while you're writing. that's where the odd little things live, and where new ones turn up.
+
+the font matters more than you'd think. big lato when it's raw, 18px serif when it's an idea. hit "random" until one feels right.
+
+there's no spellcheck. you'll notice. it's on purpose.
 
 freewrite is an open-source mac app by farza (github.com/farzaa/freewrite). this is the web version.
 
-now, new entry. timer. go.
+okay. new entry. timer. go.
 `;
 
 // A guide nobody has touched yet, in either wording. Sync leans on this to
