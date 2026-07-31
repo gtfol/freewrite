@@ -4,7 +4,7 @@ a web version of [freewrite](https://github.com/farzaa/freewrite) — write for 
 
 plus a small reader: paste a link, read it clean.
 
-everything is saved locally in your browser. nothing leaves your machine, except the links you ask the reader to fetch.
+your writing stays in this browser. sign in and it comes with you to any device; share an entry and it becomes a link. nothing moves unless you ask it to.
 
 ## dev
 
