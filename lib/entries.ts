@@ -121,11 +121,13 @@ export const WELCOME_CONTENT = `hi. welcome to freewrite.
 
 a timer, and a page — that's all of it. fifteen minutes without stopping, and when you're ready, fullscreen and then the timer.
 
-a typo shows up early and the hand moves to fix it on its own. leave it there. if the hand won't listen, there's a toggle at the bottom that takes the backspace key away for you, and mine doesn't listen either.
+pick something first, though it needn't be much: a breakup, a thing at work, an idea that won't leave you alone.
+
+a typo shows up early and the hand moves to fix it on its own. leave it there, and leave the spelling alone too — the fixing is what breaks the thing. if the hand won't listen there's a toggle at the bottom that takes the backspace key away for you, and mine doesn't listen either. pausing five or ten seconds is fine; the trick is not letting the pause turn into a decision.
 
 somewhere around minute four the words run out. this happens to everyone. writing "i don't know what to say" is still writing, and something usually follows it — a half thought, an old argument, the thing you've been circling all week without looking straight at — and then you're somewhere you hadn't planned to go, and the time is gone.
 
-let it drift. that's usually where it was headed anyway.
+let it drift. that's usually where it was headed anyway, and there's nobody here to judge where it goes. trust your mind.
 
 fifteen is longer than it sounds, so the timer scrolls down to five, and five is enough to begin with. three mornings in a row and you'll see why people have kept at this since 1973.
 
@@ -133,9 +135,9 @@ if a starting point helps: "what am i working on today? why is that the most imp
 
 the bar fades back when the time is up. you can stop.
 
-afterwards the writing stays, which is the part nobody expects — the clock in the corner holds all of it, here in this browser, and signing in lets it follow you to whatever desk or phone you end up writing from next.
+afterwards the writing stays, which is the part nobody expects — the clock in the corner holds all of it, here in this browser, and signing in lets it follow you to whatever desk or phone you end up writing from next. hover any entry there to pull it down as a markdown file.
 
-"chat" passes an entry to chatgpt or claude with the prompt already written, for the days you can't quite tell what you said. "share" makes a link, for the rare one meant for someone else. "preview" renders it properly, for when a session quietly turns into something you're building.
+"chat" passes an entry to chatgpt or claude with the prompt already written, for the days you can't quite tell what you said; it's good at catching what you circled three times without noticing. "share" makes a link, for the rare one meant for someone else. "preview" renders it properly, for when a session quietly turns into something you're building.
 
 "read" is the other half of this place: a link pasted in and stripped of its mess, read on the page or read aloud to you. "/" while writing opens the smaller things, and more arrive there in time.
 
