@@ -9,6 +9,8 @@ import { test } from "node:test";
 
 import {
   dayOf,
+  historyFloor,
+  mergePlays,
   pickSongOfDay,
   playsFrom,
   reachesDay,
@@ -119,25 +121,84 @@ test("dayOf gives one entry's whole day and nothing of the next", () => {
   assert.equal(dayOf(morning.end).start, morning.end);
 });
 
-// The whole point of the distinction: a day older than the window is a day we
+// The whole point of the distinction: a day older than the record is a day we
 // have nothing to say about, and answering "nothing played" would be a lie
 // that reads exactly like the truth.
-test("reachesDay is false for a day that ended before the window starts", () => {
-  const plays = [play("Nights", hour(30)), play("Ivy", hour(40))];
-  assert.equal(reachesDay(plays, DAY), false);
+test("reachesDay is false for a day that ended before the history starts", () => {
+  assert.equal(reachesDay(hour(30), DAY), false);
 });
 
-test("reachesDay is true while any of the window falls inside the day", () => {
-  assert.equal(reachesDay([play("Nights", hour(23))], DAY), true);
-  // Only the tail of the day survives in the window — partial, but reachable,
-  // and `considered` is what says how partial.
-  assert.equal(reachesDay([play("Nights", hour(23)), play("Ivy", hour(30))], DAY), true);
+test("reachesDay is true while any of the history falls inside the day", () => {
+  assert.equal(reachesDay(hour(23), DAY), true);
+  // Only the tail of the day was recorded — partial, but reachable, and
+  // `considered` is what says how partial.
+  assert.equal(reachesDay(hour(23.5), DAY), true);
 });
 
-// No play history at all is an answer about every day, not a window that fell
+// No play history at all is an answer about every day, not a record that fell
 // short of one.
 test("reachesDay is true when there is no history at all", () => {
-  assert.equal(reachesDay([], DAY), true);
+  assert.equal(reachesDay(null, DAY), true);
+});
+
+// The floor is what makes an old day answerable: the archive reaches back to
+// the writer's first poll, so a day the live window lost is still covered.
+test("historyFloor takes the oldest of either source", () => {
+  assert.equal(historyFloor(hour(2), [play("Nights", hour(20))]), hour(2));
+  assert.equal(historyFloor(hour(20), [play("Nights", hour(2))]), hour(2));
+});
+
+// A writer who connected a moment ago has no archive, so the live window is
+// the only floor there is.
+test("historyFloor falls back to the live window when nothing is archived", () => {
+  assert.equal(historyFloor(null, [play("Nights", hour(9))]), hour(9));
+  assert.equal(historyFloor(null, []), null);
+});
+
+test("historyFloor stays null only when neither source has anything", () => {
+  assert.equal(historyFloor(hour(5), []), hour(5));
+});
+
+// The two sources overlap by design — the archive can only be as fresh as the
+// last poll, and the live window is what covers the gap since.
+test("mergePlays collapses the overlap and keeps order", () => {
+  const archived = [play("Nights", hour(9)), play("Ivy", hour(10))];
+  const live = [play("Ivy", hour(10)), play("Pyramids", hour(11))];
+  const merged = mergePlays(archived, live);
+  assert.deepEqual(
+    merged.map((p) => p.track.name),
+    ["Nights", "Ivy", "Pyramids"]
+  );
+});
+
+test("mergePlays sorts a live window that arrives newest-first", () => {
+  const merged = mergePlays([], [play("Ivy", hour(11)), play("Nights", hour(9))]);
+  assert.deepEqual(
+    merged.map((p) => p.track.name),
+    ["Nights", "Ivy"]
+  );
+});
+
+test("mergePlays handles either side being empty", () => {
+  const one = [play("Nights", hour(9))];
+  assert.deepEqual(mergePlays(one, []), one);
+  assert.deepEqual(mergePlays([], one), one);
+  assert.deepEqual(mergePlays([], []), []);
+});
+
+// The reason the archive exists at all, end to end: a day the live 50 has long
+// since rolled past is still answerable, and still counts plays properly.
+test("a day only the archive covers still picks a song", () => {
+  const archived = [
+    play("Nights", hour(9)),
+    play("Ivy", hour(10)),
+    play("Nights", hour(11)),
+  ];
+  assert.equal(reachesDay(historyFloor(hour(2), []), DAY), true);
+  const song = pickSongOfDay(mergePlays(archived, []), DAY);
+  assert.equal(song?.track.name, "Nights");
+  assert.equal(song?.plays, 2);
+  assert.equal(song?.considered, 3);
 });
 
 test("trackIdFrom reads every shape a track link arrives in", () => {

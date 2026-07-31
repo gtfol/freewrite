@@ -46,13 +46,20 @@ if you use the writer as a daily journal, typing `/` offers the song you played 
 1. create an app in the [spotify dashboard](https://developer.spotify.com/dashboard)
 2. add `<your url>/api/auth/callback/spotify` as a redirect uri. locally that's `http://127.0.0.1:3000/api/auth/callback/spotify` — spotify rejects `localhost`, so visit the app on `127.0.0.1` too and set `BETTER_AUTH_URL` to match
 3. set `SPOTIFY_CLIENT_ID` + `SPOTIFY_CLIENT_SECRET`
-4. redeploy, sign in, then `Connect Spotify` in the cloud menu
+4. set `CRON_SECRET` (`openssl rand -base64 32`) — vercel sends it to the poller below, which refuses to run without it
+5. redeploy, sign in, then `Connect Spotify` in the cloud menu
 
 spotify only ever attaches to an account you already have: it can't create one and it can't sign you in. the one scope asked for is `user-read-recently-played`, and the token stays on the server — the browser only ever sees a track name and an id.
 
 the song lands in your entry as an ordinary markdown link (`[♫ title · artist](…)`), so it reads fine while you write, downloads with the entry, and syncs like any other text. in Preview it renders as a small card; click the card and spotify's player takes its place, so nothing loads from spotify until you ask it to.
 
-worth knowing: spotify's play history is the last 50 plays and can't be paged past, so "most played that day" is counted inside that window. on a quiet day everything has a single play and you get the most recent one. an older entry eventually falls off the back of those 50 plays, and the menu says so rather than offering you a song from the wrong day.
+worth knowing: spotify's play history is the last 50 plays and can't be paged past — there is no endpoint for "what did i play on the 3rd", and top-tracks bottoms out at about four weeks. fifty plays is roughly three hours of listening, so on the api alone yesterday is usually already gone.
+
+so the deployment keeps its own record instead, which is what every app with real history does (stats.fm, last.fm). `vercel.json` schedules `/api/cron/spotify` every half hour; it reads each connected account's window and appends it to `spotify_plays`, and consecutive polls overlap heavily by design — `(user_id, played_at)` is the primary key, so the repeats collapse. asking for a song also records what it sees, which covers the gap between polls and gets a brand-new connection's first plays in without waiting.
+
+the record starts the day you connect. before that there is nothing to read, and the menu says the day is from before your listening was recorded rather than claiming you played nothing — "we can't know" and "nothing" are different answers and it never conflates them. on a quiet day everything has a single play and you get the most recent one.
+
+the cron needs a plan with sub-daily schedules (vercel hobby caps cron at once a day; pro does per-minute). on hobby, either drop it to `0 0 * * *` and accept a daily snapshot, or point an external scheduler at the same route with the same `CRON_SECRET` bearer token.
 
 ## whiteboard
 
