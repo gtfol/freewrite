@@ -119,41 +119,39 @@ now, new entry. timer. go.
 
 export const WELCOME_CONTENT = `hi. welcome to freewrite.
 
-here's what's about to happen. you'll pick something that's been sitting on you — a breakup, a thing at work, an idea you can't shake — and you'll write about it for fifteen minutes without stopping.
+a timer, and a page. fifteen minutes without stopping — that's all of it.
 
-not "without stopping much." without stopping.
+when you're ready: fullscreen, then the timer.
 
-go fullscreen. start the timer. go.
+a typo will show up early. the hand moves to fix it on its own. better to leave it there. if the hand won't listen, there's a toggle at the bottom that takes backspace away for you — mine doesn't listen either.
 
-about two minutes in you'll make a typo and your hand will move to fix it. don't. that reflex is the whole thing we're getting around here. there's a toggle at the bottom that takes the backspace key away entirely, if you don't trust yourself. i don't trust myself.
+somewhere around minute four the words run out. this happens to everyone. "i don't know what to say" is also writing, and something usually follows it. the topic will drift too, and often that's where it was headed anyway.
 
-around minute four you'll run out of things to say. everyone does. write "i don't know what to say" over and over until something comes, because it always comes. and don't stay on topic — wander. the wandering is where the good stuff is hiding.
+fifteen is longer than it sounds. the timer scrolls down to five, and five is enough. three mornings in a row and you'll see why people have kept at this since 1973.
 
-fifteen minutes feels long because it is. scroll on the timer to make it five. five is a real session — do that three days straight and you'll see why people have been at this since 1973.
+if a starting point helps: "what am i working on today? why is that the most important thing for me to work on?"
 
-somewhere to start, if you need one: "what am i working on today? why is that the most important thing for me to work on?"
+the bar fades back when the time is up. nothing more to do — you can stop.
 
-when the time's up the bar fades back in. that's your cue. stop.
+afterwards, the writing stays.
 
-then the part nobody expects: what you wrote is still sitting there.
+the clock in the corner keeps all of it. it lives in this browser, and signing in lets it follow you to wherever you write next.
 
-the clock in the corner holds all of it. it lives in this browser, and if you sign in it comes with you — laptop, phone, wherever you end up writing next.
+"chat" passes an entry to chatgpt or claude with the prompt already written, for the days you can't quite tell what you said.
 
-when you finish one and can't quite tell what you just said, hit "chat". it hands the entry to chatgpt or claude with the prompt already written, and it's good at catching the thing you circled three times without noticing.
+"share" makes a link, for the rare one meant for someone else. "preview" renders it properly, for when a session quietly becomes something you're building.
 
-"share" turns an entry into a link, for the rare one someone else should read. "preview" renders it properly, for when a session stops being a session and turns into something you're building.
+"read" is the other half of this place — a link pasted in, read without the mess, or read aloud to you.
 
-"read" is the other half of this place: paste a link, read it without the mess, or sit back and have it read to you.
+"/" while writing opens the smaller things. more arrive there in time.
 
-and type "/" while you're writing. that's where the odd little things live, and where new ones turn up.
+the font is worth a moment. lato, large, when it's raw. serif at 18 when it's an idea. "random" until something fits.
 
-the font matters more than you'd think. big lato when it's raw, 18px serif when it's an idea. hit "random" until one feels right.
-
-there's no spellcheck. you'll notice. it's on purpose.
+there's no spellcheck. that was on purpose.
 
 freewrite is an open-source mac app by farza (github.com/farzaa/freewrite). this is the web version.
 
-okay. new entry. timer. go.
+now. new entry, timer. go.
 `;
 
 // A guide nobody has touched yet, in either wording. Sync leans on this to
