@@ -1,16 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { caretPoint } from "@/lib/caret";
+import { isToday, shortDate } from "@/lib/entries";
 import { newSketchId, sketchBefore, sketchRef } from "@/lib/sketch";
-import { trackMarkdown } from "@/lib/spotify";
+import { dayOf, trackMarkdown } from "@/lib/spotify";
 import { useSpotify } from "@/lib/spotify-connect";
-import { useWriter } from "@/lib/store";
+import { currentEntry, useWriter } from "@/lib/store";
 import { useSync } from "@/lib/sync";
 
 // Type "/" and the two things you can drop into an entry are a keystroke away:
-// the song you played most today, and a whiteboard.
+// the song you played most the day the entry was written, and a whiteboard.
 
 const MENU_WIDTH = 288;
 // Enough to decide whether the menu fits below the caret before it renders.
@@ -74,6 +75,21 @@ export function useSlashMenu(
   const loadSong = useSpotify((s) => s.loadSong);
   const connect = useSpotify((s) => s.connect);
   const setContent = useWriter((s) => s.setContent);
+  // The song belongs to the day the entry was written, not to the clock: an
+  // entry opened from last Tuesday asks about last Tuesday. Selected down to
+  // the timestamp so switching entries within a day doesn't churn.
+  const writtenAt = useWriter((s) => currentEntry(s)?.createdAt ?? null);
+
+  const day = useMemo(
+    () => (writtenAt === null ? null : dayOf(writtenAt)),
+    [writtenAt]
+  );
+  // How the menu names that day. "today" for an entry started today, so the
+  // common case reads the way it always did.
+  const when =
+    writtenAt !== null && !isToday(writtenAt)
+      ? `on ${shortDate(writtenAt)}`
+      : "today";
 
   // The "/" offset, mirrored in a ref because the input and keydown handlers
   // read it in the same tick they set it.
@@ -214,7 +230,8 @@ export function useSlashMenu(
       await connect();
       return;
     }
-    await loadSong();
+    if (!day) return;
+    await loadSong(day);
     const current = useSpotify.getState().song;
     if (!current) return;
     switch (current.state) {
@@ -222,7 +239,12 @@ export function useSlashMenu(
         replaceCommand(`${trackMarkdown(current.song.track)} `);
         return;
       case "empty":
-        setNote("Nothing played yet today.");
+        setNote(`Nothing played ${when}.`);
+        return;
+      case "out-of-reach":
+        // Nothing to offer and nothing to fix — Spotify keeps 50 plays and
+        // this entry's day fell off the back of them.
+        setNote("That day is further back than Spotify remembers.");
         return;
       case "unlinked":
         setNote("Connect Spotify to use this.");
@@ -234,7 +256,7 @@ export function useSlashMenu(
         setNote(current.message);
         return;
     }
-  }, [signedIn, linked, connect, loadSong, replaceCommand]);
+  }, [signedIn, linked, connect, day, when, loadSong, replaceCommand]);
 
   const runDraw = useCallback(() => {
     if (editing) {
@@ -252,21 +274,24 @@ export function useSlashMenu(
     onDraw(id);
   }, [editing, replaceCommand, onDraw]);
 
-  // What the song row says depends on how far along the connection is.
+  // What the song row says depends on how far along the connection is — and,
+  // once it works, on which day is being asked about.
   let songLabel = "Song of the day";
-  let songHint = "most played since midnight";
+  let songHint = `most played ${when}`;
   if (!signedIn) {
     songHint = "sign in to connect Spotify";
   } else if (linked === false) {
     songLabel = "Connect Spotify";
-    songHint = "once, then / finds today's song";
+    songHint = "once, then / finds the entry's song";
   } else if (loading) {
     songHint = "asking Spotify…";
   } else if (song?.state === "ok") {
     const { track, plays } = song.song;
     songHint = `${track.name} · ${track.artist}${plays > 1 ? ` · ${plays} plays` : ""}`;
   } else if (song?.state === "empty") {
-    songHint = "nothing played yet today";
+    songHint = `nothing played ${when}`;
+  } else if (song?.state === "out-of-reach") {
+    songHint = "further back than Spotify remembers";
   } else if (song?.state === "reconnect") {
     songLabel = "Reconnect Spotify";
     songHint = "access expired";
@@ -292,12 +317,13 @@ export function useSlashMenu(
   const songShowing = showing && visible.some((item) => item.key === "song");
 
   // Look up the connection once the song is actually on offer, and warm it so
-  // Enter doesn't wait on a round trip.
+  // Enter doesn't wait on a round trip. Re-runs when the entry's day changes,
+  // which is what keeps the hint describing the entry actually open.
   useEffect(() => {
     if (!songShowing || !signedIn) return;
     if (linked === null) void refreshLink();
-    else if (linked) void loadSong();
-  }, [songShowing, signedIn, linked, refreshLink, loadSong]);
+    else if (linked && day) void loadSong(day);
+  }, [songShowing, signedIn, linked, day, refreshLink, loadSong]);
 
   // The caret can move under the menu without the text changing at all.
   useEffect(() => {
