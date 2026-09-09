@@ -1,0 +1,56 @@
+README.md
+  h_606d960bac5d85 5,16-23
+app/api/pdf-assets/[kind]/[name]/route.ts
+  h_606d960bac5d85 1-24
+app/api/sync/route.ts
+  h_606d960bac5d85 7
+app/read/[id]/page.tsx
+  h_606d960bac5d85 32,51,231-233,239,282
+app/read/page.tsx
+  h_606d960bac5d85 19,31,91,181,185,192-198,357
+components/pdf-importer.tsx
+  h_606d960bac5d85 1-145
+components/reader-nav.tsx
+  h_606d960bac5d85 124-126,157,164,239,242,249
+hooks/use-article-original.ts
+  h_606d960bac5d85 1-23
+lib/article-validation.test.ts
+  h_606d960bac5d85 1-127
+lib/article-validation.ts
+  h_606d960bac5d85 1-108
+lib/articles.ts
+  h_606d960bac5d85 36
+lib/chat.test.ts
+  h_606d960bac5d85 1-11
+lib/chat.ts
+  h_606d960bac5d85 65,73,82-83
+lib/db.ts
+  h_606d960bac5d85 4,11,91-93,217-241,253,313-316
+lib/pdf-browser.ts
+  h_606d960bac5d85 1-65
+lib/pdf-storage.test.ts
+  h_606d960bac5d85 1-50
+lib/pdf.test.ts
+  h_606d960bac5d85 1-42
+lib/pdf.ts
+  h_606d960bac5d85 1-78
+lib/types.ts
+  h_606d960bac5d85 50
+next.config.ts
+  h_606d960bac5d85 5-11
+package-lock.json
+  h_606d960bac5d85 30,48,1252-1501,5065-5074,7254-7265
+package.json
+  h_606d960bac5d85 32,50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "2fcedbc0cf8e64db1e1766b1b69f24c56d2ce338",
+  "prompts": {},
+  "humans": {
+    "h_606d960bac5d85": {
+      "author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
