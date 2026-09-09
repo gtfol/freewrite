@@ -1,3 +1,5 @@
+import { entryShareTtlSeconds, type EntryShareExpiry } from "./share-expiry.ts";
+
 // Management capabilities stay in this browser. Public links contain only the
 // id. Clearing browser data loses ownership, so permanent links need an explicit
 // Delete link action and storage failures must never be silently ignored.
@@ -8,6 +10,8 @@ export interface ShareRecord {
   sharedAt: number;
   expiresAt: number | null;
   entryUpdatedAt: number;
+  pendingCreate?: boolean;
+  requestedExpiry?: EntryShareExpiry;
 }
 
 const STORAGE_KEY = "freewrite:shares";
@@ -23,6 +27,27 @@ export function beginEntryShareMutation(entryId: string): () => void {
     if (mutations.get(entryId) === completion) mutations.delete(entryId);
     finish();
   };
+}
+
+export async function withShareLock<T>(operation: () => Promise<T>): Promise<T> {
+  if (typeof window === "undefined") return operation();
+  if (!navigator.locks) throw new Error("Your browser can't safely manage share links. Update it and try again.");
+  return navigator.locks.request(STORAGE_KEY, operation);
+}
+
+export function prepareShareRecord(entryId: string, entryUpdatedAt: number, expiry: EntryShareExpiry): ShareRecord {
+  const existing = getShareRecord(entryId, true);
+  if (existing) return existing;
+  const random = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))))
+    .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+  const ttl = entryShareTtlSeconds(expiry);
+  const record: ShareRecord = {
+    id: random(), token: random(), sharedAt: Date.now(),
+    expiresAt: ttl === null ? null : Date.now() + ttl * 1000,
+    entryUpdatedAt, pendingCreate: true, requestedExpiry: expiry,
+  };
+  setShareRecord(entryId, record);
+  return record;
 }
 
 function validRecord(value: unknown): value is ShareRecord {
@@ -71,8 +96,9 @@ export function hasPendingShareRecords(): boolean {
 
 export function getShareRecord(entryId: string, strict = false): ShareRecord | null {
   const record = pending.get(entryId) ?? readAll(strict)[entryId];
-  if (!record || (record.expiresAt !== null && record.expiresAt <= Date.now())) return null;
-  return record;
+  // Cached dates may be stale after a lost expiry-change response. Only the
+  // server can confirm that a link is gone; never discard its token by date.
+  return record ?? null;
 }
 
 export function shareRecordIsSaved(entryId: string): boolean {
@@ -81,6 +107,8 @@ export function shareRecordIsSaved(entryId: string): boolean {
 
 export function setShareRecord(entryId: string, record: ShareRecord): void {
   if (!validRecord(record)) throw new Error("The share link couldn't be read. Try again.");
+  const existing = getShareRecord(entryId, true);
+  if (existing && existing.id !== record.id) throw new Error("This entry already has a share link. Check its controls before creating another.");
   // Keep the capability available for retry / revoke even if durable storage
   // fails after the server has already created or changed the link.
   pending.set(entryId, record);
@@ -88,8 +116,10 @@ export function setShareRecord(entryId: string, record: ShareRecord): void {
   pending.clear();
 }
 
-export function clearShareRecord(entryId: string): void {
+export function clearShareRecord(entryId: string, expectedId?: string): void {
   const records = readAll(true);
+  if (expectedId && records[entryId] && records[entryId].id !== expectedId) return;
+  if (expectedId && pending.has(entryId) && pending.get(entryId)!.id !== expectedId) return;
   delete records[entryId];
   writeAll(records);
   pending.delete(entryId);
@@ -99,18 +129,21 @@ export function shareUrl(id: string): string {
   return `${window.location.origin}/share/${id}`;
 }
 
-export function expiresLabel(expiresAt: number | null): string {
+export function expiresLabel(expiresAt: number | null, now = Date.now()): string {
   if (expiresAt === null) return "Never";
-  const days = Math.max(1, Math.ceil((expiresAt - Date.now()) / 86_400_000));
+  if (expiresAt <= now) return "Expired";
+  const days = Math.max(1, Math.ceil((expiresAt - now) / 86_400_000));
   return days === 1 ? "1 day" : `${days} days`;
 }
 
-export async function revokeEntryShare(entryId: string): Promise<void> {
+export async function revokeEntryShare(entryId: string, expectedId?: string): Promise<void> {
   // A user can open History while publication is still in flight. Wait for
   // its token to be saved before revoking / removing the underlying entry.
   await mutations.get(entryId);
+  return withShareLock(async () => {
   const share = getShareRecord(entryId, true);
   if (!share) return;
+  if (expectedId && share.id !== expectedId) throw new Error("This entry's share link changed. Check its controls and try again.");
   let response: Response;
   try {
     response = await fetch(`/api/share/entry/${share.id}`, {
@@ -124,5 +157,6 @@ export async function revokeEntryShare(entryId: string): Promise<void> {
   if (!response.ok && response.status !== 410) {
     throw new Error("Couldn't delete the share link. Try again before deleting this entry.");
   }
-  clearShareRecord(entryId);
+  clearShareRecord(entryId, share.id);
+  });
 }

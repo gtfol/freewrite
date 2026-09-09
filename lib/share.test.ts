@@ -10,6 +10,7 @@ import {
   deleteEntryShare,
   entrySnapshotFromBody,
   getEntryShare,
+  getEntryShareStatus,
   putEntryShare,
   putShare,
   updateEntryShare,
@@ -208,4 +209,41 @@ integration("temporary reader snapshots retain their thirty-minute default", asy
   } finally {
     if (original !== undefined) process.env.SHARE_TTL_SECONDS = original;
   }
+});
+
+
+integration("a lost create response can be retried with the durable capability", async () => {
+  const capability = { id: "cccccccccccccccccccccc", token: "dddddddddddddddddddddd" };
+  const first = await putEntryShare(snapshot, "never", capability);
+  const recovered = await putEntryShare({ ...snapshot, content: "New local edits" }, "7d", capability);
+  assert.equal(recovered.id, first.id);
+  assert.equal(recovered.token, first.token);
+  assert.equal(recovered.expiresAt, null);
+  assert.deepEqual(await getEntryShare(first.id), snapshot);
+  await assert.rejects(putEntryShare(snapshot, "never", { ...capability, token: "xxxxxxxxxxxxxxxxxxxxxx" }), { status: 403 });
+});
+
+integration("deleted and expired ids cannot be recreated by delayed POST retries", async () => {
+  for (const mode of ["delete", "expiry"] as const) {
+    const link = await putEntryShare(snapshot, "never");
+    if (mode === "delete") await deleteEntryShare(link.id, link.token);
+    else { command(["PEXPIRE", `share:entry:${link.id}`, 1]); await pause(10); }
+    await assert.rejects(putEntryShare(snapshot, "never", link), { status: 410 });
+    assert.equal(await getEntryShare(link.id), null);
+  }
+});
+
+integration("revoking an unconfirmed create prevents a late first POST", async () => {
+  const capability = { id: "eeeeeeeeeeeeeeeeeeeeee", token: "ffffffffffffffffffffff" };
+  assert.equal(await deleteEntryShare(capability.id, capability.token), "missing");
+  await assert.rejects(putEntryShare(snapshot, "never", capability), { status: 410 });
+  assert.equal(await getEntryShare(capability.id), null);
+});
+
+integration("metadata recovers an uncertain expiry change without publishing edits", async () => {
+  const link = await putEntryShare(snapshot, "7d");
+  await changeEntryShareExpiry(link.id, link.token, "never");
+  assert.deepEqual(await getEntryShareStatus(link.id, link.token), { result: "ok", expiresAt: null });
+  assert.equal((await getEntryShareStatus(link.id, "xxxxxxxxxxxxxxxxxxxxxx")).result, "denied");
+  assert.deepEqual(await getEntryShare(link.id), snapshot);
 });

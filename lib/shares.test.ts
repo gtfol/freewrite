@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import {
   assertShareStorage, beginEntryShareMutation, clearShareRecord, expiresLabel, getShareRecord,
-  hasPendingShareRecords, revokeEntryShare, setShareRecord, shareRecordIsSaved,
+  hasPendingShareRecords, prepareShareRecord, revokeEntryShare, setShareRecord, shareRecordIsSaved,
   type ShareRecord,
 } from "./shares.ts";
 
@@ -57,7 +57,7 @@ test("old timed ownership records retain their expiry", () => {
   values.set(key, JSON.stringify({ entry: legacy }));
   assert.deepEqual(getShareRecord("entry"), legacy);
   values.set(key, JSON.stringify({ entry: { ...record, expiresAt: Date.now() - 1 } }));
-  assert.equal(getShareRecord("entry"), null);
+  assert.equal(getShareRecord("entry")!.id, record.id);
 });
 
 test("storage preflight fails before publication and never erases existing controls", () => {
@@ -131,4 +131,36 @@ test("entry deletion waits for an in-flight publication and then revokes it", as
   await revoked;
   assert.equal(fetched, true);
   assert.equal(getShareRecord("entry"), null);
+});
+
+
+test("controls are durable before publication and retries reuse the same capability", () => {
+  const prepared = prepareShareRecord("entry", 2000, "never");
+  assert.equal(prepared.pendingCreate, true);
+  assert.equal(prepared.expiresAt, null);
+  assert.deepEqual(JSON.parse(values.get(key)!).entry, prepared);
+  assert.deepEqual(prepareShareRecord("entry", 3000, "7d"), prepared);
+});
+
+test("an elapsed cached date after an uncertain Never change does not skip revocation", async () => {
+  const elapsed = { ...record, expiresAt: Date.now() - 1000 };
+  setShareRecord("entry", elapsed);
+  let fetched = false;
+  globalThis.fetch = async () => { fetched = true; return Response.json({}); };
+  await revokeEntryShare("entry");
+  assert.equal(fetched, true);
+});
+
+test("a stale delete cannot remove a newer capability's controls", () => {
+  setShareRecord("entry", record);
+  clearShareRecord("entry", "xxxxxxxxxxxxxxxxxxxxxx");
+  assert.deepEqual(getShareRecord("entry"), record);
+  assert.throws(() => setShareRecord("entry", { ...record, id: "xxxxxxxxxxxxxxxxxxxxxx" }), /already has a share link/);
+  assert.deepEqual(getShareRecord("entry"), record);
+});
+
+test("an elapsed ownership record is never overwritten by another create attempt", () => {
+  const elapsed = { ...record, expiresAt: Date.now() - 1000 };
+  setShareRecord("entry", elapsed);
+  assert.deepEqual(prepareShareRecord("entry", 3000, "never"), elapsed);
 });

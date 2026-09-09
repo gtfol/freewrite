@@ -6,6 +6,7 @@ import {
   changeEntryShareExpiry,
   deleteEntryShare,
   entrySnapshotFromBody,
+  getEntryShareStatus,
   shareEnabled,
   updateEntryShare,
   type EntryShareMutation,
@@ -150,5 +151,20 @@ export async function PATCH(
     return NextResponse.json({ expiresAt }, { headers: { "cache-control": "no-store" } });
   } catch {
     return NextResponse.json({ error: "Couldn't change the link expiry" }, { status: 502 });
+  }
+}
+
+
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  if (!shareEnabled()) return unavailable();
+  const { id } = await params;
+  const token = tokenFrom(request);
+  if (!token) return NextResponse.json({ error: "Not allowed" }, { status: 403 });
+  try {
+    const { result, expiresAt } = await getEntryShareStatus(id, token);
+    if (result !== "ok") return mutationError(result);
+    return NextResponse.json({ expiresAt }, { headers: { "cache-control": "no-store" } });
+  } catch {
+    return NextResponse.json({ error: "Couldn't check the link" }, { status: 502 });
   }
 }

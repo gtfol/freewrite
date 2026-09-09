@@ -13,17 +13,19 @@ import {
   expiresLabel,
   getShareRecord,
   hasPendingShareRecords,
+  prepareShareRecord,
   revokeEntryShare,
   setShareRecord,
   shareRecordIsSaved,
   shareUrl,
+  withShareLock,
   type ShareRecord,
 } from "@/lib/shares";
 import { currentEntry, usePrefs, useWriter } from "@/lib/store";
 
 const optionClass = "w-full rounded-md px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-accent disabled:opacity-40";
 const noteClass = "px-3 py-2 text-xs text-muted-foreground";
-type Busy = "create" | "update" | "expiry" | "delete" | null;
+type Busy = "create" | "update" | "expiry" | "delete" | "check" | null;
 type ExpiryChoice = EntryShareExpiry | "keep";
 
 export function SharePopover() {
@@ -40,6 +42,7 @@ export function SharePopover() {
   } | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
   const [copied, setCopied] = useState(false);
+  const [now, setNow] = useState(Date.now);
 
   useEffect(() => {
     fetch("/api/share")
@@ -92,24 +95,31 @@ export function SharePopover() {
     const complete = beginEntryShareMutation(entry.id);
     setBusy("create");
     try {
-      assertShareStorage();
-      const res = await fetch("/api/share/entry", {
-        method: "POST",
-        signal: AbortSignal.timeout(15_000),
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...snapshot(), expiresIn: expiry === "keep" ? DEFAULT_ENTRY_SHARE_EXPIRY : expiry }),
+      await withShareLock(async () => {
+        assertShareStorage();
+        const prepared = prepareShareRecord(entry.id, entry.updatedAt, expiry === "keep" ? DEFAULT_ENTRY_SHARE_EXPIRY : expiry);
+        if (!prepared.pendingCreate) { setPanelState(prepared); return; }
+        setPanelState(prepared);
+        const res = await fetch("/api/share/entry", {
+          method: "POST",
+          signal: AbortSignal.timeout(15_000),
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...snapshot(), expiresIn: prepared.requestedExpiry, id: prepared.id, token: prepared.token }),
       });
       const body = await res.json();
+      if (res.status === 410) {
+        clearShareRecord(entry.id, prepared.id);
+        setPanelState(null, failureMessage(body));
+        return;
+      }
       if (!res.ok) throw new Error(failureMessage(body));
       const next: ShareRecord = {
-        id: body.id,
-        token: body.token,
-        sharedAt: Date.now(),
+        ...prepared, pendingCreate: false,
         expiresAt: body.expiresAt,
-        entryUpdatedAt: entry.updatedAt,
       };
       setShareRecord(entry.id, next);
       setPanelState(next);
+      });
     } catch (error) {
       setPanelState(getShareRecord(entry.id), error instanceof Error ? error.message : "Couldn't create a share link");
     } finally {
@@ -123,16 +133,19 @@ export function SharePopover() {
     const complete = beginEntryShareMutation(entry.id);
     setBusy(expiryOnly ? "expiry" : "update");
     try {
-      const res = await fetch(`/api/share/entry/${record.id}`, {
-        method: expiryOnly ? "PATCH" : "PUT",
-        signal: AbortSignal.timeout(15_000),
-        headers: { "content-type": "application/json", "x-share-token": record.token },
-        // Updating the snapshot preserves expiry. Changing expiry preserves the snapshot.
-        body: JSON.stringify(expiryOnly ? { expiresIn: expiry } : snapshot()),
+      await withShareLock(async () => {
+        const current = getShareRecord(entry.id, true);
+        if (!current || current.id !== record.id) throw new Error("This entry's share link changed. Check its controls and try again.");
+        const res = await fetch(`/api/share/entry/${record.id}`, {
+          method: expiryOnly ? "PATCH" : "PUT",
+          signal: AbortSignal.timeout(15_000),
+          headers: { "content-type": "application/json", "x-share-token": record.token },
+          // Updating the snapshot preserves expiry. Changing expiry preserves the snapshot.
+          body: JSON.stringify(expiryOnly ? { expiresIn: expiry } : snapshot()),
       });
       const body = await res.json();
       if (res.status === 410) {
-        clearShareRecord(entry.id);
+        clearShareRecord(entry.id, record.id);
         setPanelState(null, "That link expired or was deleted — create a new one");
         return;
       }
@@ -144,6 +157,7 @@ export function SharePopover() {
       };
       setShareRecord(entry.id, next);
       setPanelState(next, null, expiryOnly ? "keep" : expiry);
+      });
     } catch (error) {
       setPanelState(getShareRecord(entry.id) ?? record, error instanceof Error ? error.message : "Couldn't update the link", expiry);
     } finally {
@@ -156,7 +170,7 @@ export function SharePopover() {
     if (!record) return;
     setBusy("delete");
     try {
-      await revokeEntryShare(entry.id);
+      await revokeEntryShare(entry.id, record.id);
       setPanelState(null);
     } catch (error) {
       setPanelState(record, error instanceof Error ? error.message : "Couldn't delete the link", expiry);
@@ -165,14 +179,43 @@ export function SharePopover() {
     }
   };
 
-  const retryStorage = () => {
+  const retryStorage = async () => {
     if (!record) return;
     try {
-      setShareRecord(entry.id, record);
-      setPanelState(record, null, expiry);
+      await withShareLock(async () => {
+        setShareRecord(entry.id, record);
+        setPanelState(record, null, expiry);
+      });
     } catch (error) {
       setPanelState(record, error instanceof Error ? error.message : "Couldn't save the link controls", expiry);
     }
+  };
+
+  const checkLink = async () => {
+    if (!record) return;
+    setBusy("check");
+    try {
+      await withShareLock(async () => {
+        const res = await fetch(`/api/share/entry/${record.id}`, {
+          headers: { "x-share-token": record.token }, cache: "no-store", signal: AbortSignal.timeout(15_000),
+        });
+        const body = await res.json();
+        if (res.status === 410) {
+          // A pending create may still be in flight: Delete link must retire
+          // its id before we discard the controls.
+          if (record.pendingCreate) throw new Error("Creation is not confirmed. Retry creating the link, or delete it.");
+          clearShareRecord(entry.id, record.id);
+          setPanelState(null, "That link expired or was deleted — create a new one");
+          return;
+        }
+        if (!res.ok) throw new Error(failureMessage(body));
+        const next = { ...record, pendingCreate: false, expiresAt: body.expiresAt };
+        setShareRecord(entry.id, next);
+        setPanelState(next);
+      });
+    } catch (error) {
+      setPanelState(getShareRecord(entry.id) ?? record, error instanceof Error ? error.message : "Couldn't check the link", expiry);
+    } finally { setBusy(null); }
   };
 
   const copy = async () => {
@@ -192,11 +235,11 @@ export function SharePopover() {
       <select
         aria-label="Link expiry"
         value={expiry}
-        disabled={busy !== null || !persisted}
+        disabled={busy !== null || !persisted || !!record?.pendingCreate}
         className="max-w-44 rounded bg-background py-1 text-foreground focus-visible:outline focus-visible:outline-1"
         onChange={(event) => setPanelState(record, null, event.target.value as ExpiryChoice)}
       >
-        {record && <option value="keep">{record.expiresAt === null ? "Never (current)" : `In ${expiresLabel(record.expiresAt)} (current)`}</option>}
+        {record && <option value="keep">{record.expiresAt === null ? "Never (current)" : (record.expiresAt <= now ? "Check expiry" : `In ${expiresLabel(record.expiresAt, now)} (current)`)}</option>}
         <option value="7d">7 days</option>
         <option value="30d">30 days</option>
         <option value="never">Never</option>
@@ -205,7 +248,7 @@ export function SharePopover() {
   );
 
   return (
-    <Popover>
+    <Popover onOpenChange={() => setNow(Date.now())}>
       <PopoverTrigger className="text-muted-foreground transition-colors hover:text-foreground">Share</PopoverTrigger>
       <PopoverContent side="top" align="center" className="w-72 p-2">
         {shareReady === false ? (
@@ -226,20 +269,27 @@ export function SharePopover() {
         ) : (
           <div className="flex flex-col gap-1">
             <p className="select-all truncate px-3 pt-2 text-xs text-muted-foreground">{shareUrl(record.id)}</p>
-            <button className={optionClass} onClick={copy} disabled={!persisted}>{copied ? "Copied" : "Copy link"}</button>
+            <button className={optionClass} onClick={copy} disabled={!persisted || record.pendingCreate}>{copied ? "Copied" : "Copy link"}</button>
             {!persisted && (
               <>
-                <p role="alert" className={noteClass}>This link is active, but its controls aren&apos;t saved. Keep this tab open until you save them or delete the link.</p>
+                <p role="alert" className={noteClass}>The link controls aren&apos;t saved yet. Keep this tab open until you save them or delete the link.</p>
                 <button className={optionClass} onClick={retryStorage} disabled={busy !== null}>Retry saving link controls</button>
               </>
             )}
+            {record.pendingCreate && (
+              <>
+                <p className={noteClass}>Creation is not confirmed yet. Retry when the controls are saved, or delete the link.</p>
+                <button className={optionClass} onClick={create} disabled={busy !== null || !persisted || isEmpty}>{busy === "create" ? "Creating link…" : "Retry creating link"}</button>
+              </>
+            )}
             {expiryPicker}
+            <button className={optionClass} onClick={checkLink} disabled={busy !== null || !persisted}>{busy === "check" ? "Checking…" : "Check link"}</button>
             {expiry !== "keep" && (
-              <button className={optionClass} onClick={() => update(true)} disabled={busy !== null || !persisted}>
+              <button className={optionClass} onClick={() => update(true)} disabled={busy !== null || !persisted || record.pendingCreate}>
                 {busy === "expiry" ? "Saving…" : "Save expiry"}
               </button>
             )}
-            {stale && (
+            {stale && !record.pendingCreate && (
               <button className={optionClass} onClick={() => update()} disabled={busy !== null || !persisted || isEmpty}>
                 {busy === "update" ? "Updating…" : "Update link — entry has changed"}
               </button>
@@ -253,7 +303,7 @@ export function SharePopover() {
             </button>
             <div className="my-1 h-px bg-border" />
             <p className="px-3 pb-2 text-xs text-muted-foreground">
-              Anyone with the link can read this entry. {record.expiresAt === null ? "It stays available until you delete the link." : `It expires in ${expiresLabel(record.expiresAt)}.`}
+              Anyone with the link can read this entry. {record.expiresAt === null ? "It stays available until you delete the link." : record.expiresAt <= now ? "Check the link to confirm whether it is still available." : `It expires in ${expiresLabel(record.expiresAt, now)}.`}
             </p>
             <p className="px-3 pb-2 text-xs text-muted-foreground">Link controls stay in this browser. Clearing browser data removes your access to them.</p>
             {error && <p role="alert" className={noteClass}>{error}</p>}
