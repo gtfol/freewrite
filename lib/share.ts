@@ -1,8 +1,9 @@
-import { randomBytes, timingSafeEqual } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 
-import { ALL_FONTS, DEFAULT_FONT_ID, DEFAULT_FONT_SIZE } from "@/lib/fonts";
-import { parseSketches } from "@/lib/sketch";
-import type { Sketch } from "@/lib/types";
+import { ALL_FONTS, DEFAULT_FONT_ID, DEFAULT_FONT_SIZE } from "./fonts.ts";
+import { parseSketches } from "./sketch.ts";
+import type { Sketch } from "./types.ts";
+import { entryShareTtlSeconds, type EntryShareExpiry } from "./share-expiry.ts";
 
 // Ephemeral article snapshots for the reader's chat link-out, stored in
 // Upstash Redis / Vercel KV via its REST API (plain fetch, no client dep).
@@ -80,16 +81,7 @@ export async function allowShare(ip: string): Promise<boolean> {
 // link returns the id plus a secret token that stays in the author's
 // browser; the token is what authorizes updating or deleting the link
 // later. Snapshots live in the same KV store under their own, much longer
-// TTL, refreshed whenever the author pushes an update.
-
-const DEFAULT_ENTRY_TTL_SECONDS = 30 * 24 * 60 * 60;
-
-export function entryShareTtlSeconds(): number {
-  const raw = Number(process.env.SHARE_ENTRY_TTL_SECONDS);
-  return Number.isFinite(raw) && raw >= 3600 && raw <= 365 * 24 * 60 * 60
-    ? Math.floor(raw)
-    : DEFAULT_ENTRY_TTL_SECONDS;
-}
+// lifetime. Timed links use Redis expiry; Never links remain until revoked.
 
 export interface EntryShareSnapshot {
   content: string;
@@ -115,6 +107,9 @@ export function entrySnapshotFromBody(body: {
   sketches?: unknown;
   createdAt?: unknown;
 }): EntryShareSnapshot | { error: string; status: number } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { error: "Invalid request", status: 400 };
+  }
   const content = typeof body.content === "string" ? body.content : "";
   if (!content.trim()) {
     return { error: "Nothing to share", status: 400 };
@@ -159,12 +154,6 @@ function entryKey(id: string): string {
   return `share:entry:${id}`;
 }
 
-function tokenMatches(expected: string, given: string): boolean {
-  const a = Buffer.from(expected);
-  const b = Buffer.from(given);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 async function readEntryShare(
   id: string
 ): Promise<(EntryShareSnapshot & { token: string }) | null> {
@@ -180,7 +169,7 @@ async function readEntryShare(
     }
     if (typeof parsed.token !== "string") return null;
     // Re-validated on the way out as well as in: the snapshot is only as
-    // trustworthy as the store it spent the last half hour in, and its
+    // trustworthy as the store it came from, and its
     // drawings end up as markup on a public page.
     const sketches = parseSketches(parsed.sketches);
     return {
@@ -203,20 +192,60 @@ async function readEntryShare(
   }
 }
 
+export interface EntryShareCapability { id: string; token: string }
+
+export class EntryShareCreateError extends Error {
+  status: number;
+  constructor(status: number, message: string) { super(message); this.status = status; }
+}
+
+const CREATE_ENTRY_SCRIPT = `
+local owner = redis.call('GET', KEYS[2])
+local raw = redis.call('GET', KEYS[1])
+if owner then
+  if owner ~= ARGV[1] then return 'denied' end
+  if not raw then return 'retired' end
+  return 'existing'
+end
+if raw then return 'denied' end
+redis.call('SET', KEYS[2], ARGV[1])
+if ARGV[3] == '-1' then redis.call('SET', KEYS[1], ARGV[2])
+else redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3]) end
+return 'created'
+`;
+
+function ownerKey(id: string): string { return `share:entry-owner:${id}`; }
+function tokenHash(token: string): string { return createHash('sha256').update(token).digest('hex'); }
+
 export async function putEntryShare(
-  snapshot: EntryShareSnapshot
-): Promise<{ id: string; token: string; ttlSeconds: number }> {
-  const id = randomBytes(16).toString("base64url");
-  const token = randomBytes(16).toString("base64url");
-  const ttl = entryShareTtlSeconds();
-  await redis([
-    "SET",
-    entryKey(id),
-    JSON.stringify({ ...snapshot, token }),
-    "EX",
-    ttl,
+  snapshot: EntryShareSnapshot,
+  expiry: EntryShareExpiry = "7d",
+  capability?: EntryShareCapability
+): Promise<{ id: string; token: string; ttlSeconds: number | null; expiresAt: number | null }> {
+  const id = capability?.id ?? randomBytes(16).toString("base64url");
+  const token = capability?.token ?? randomBytes(16).toString("base64url");
+  if (!SHARE_ID_PATTERN.test(id) || !SHARE_ID_PATTERN.test(token)) {
+    throw new EntryShareCreateError(400, "Invalid link controls");
+  }
+  const ttlSeconds = entryShareTtlSeconds(expiry);
+  const expiresAt = ttlSeconds === null ? null : Date.now() + ttlSeconds * 1000;
+  const result = await redis([
+    "EVAL", CREATE_ENTRY_SCRIPT, 2, entryKey(id), ownerKey(id), tokenHash(token),
+    JSON.stringify({ ...snapshot, token, expiresAt }), ttlSeconds ?? -1,
   ]);
-  return { id, token, ttlSeconds: ttl };
+  if (result === "denied") throw new EntryShareCreateError(403, "Not allowed");
+  if (result === "retired") throw new EntryShareCreateError(410, "This link expired or was deleted. Create a new link.");
+  if (result === "existing") {
+    // A retry after a lost response returns the same link, preserving the first
+    // published snapshot and expiry rather than republishing current edits.
+    const status = await getEntryShareStatus(id, token);
+    if (status.result === "missing") throw new EntryShareCreateError(410, "This link expired or was deleted. Create a new link.");
+    if (status.result !== "ok") throw new EntryShareCreateError(status.result === "denied" ? 403 : 409, "This link changed. Check it and try again.");
+    return { id, token, expiresAt: status.expiresAt,
+      ttlSeconds: status.expiresAt === null ? null : Math.max(0, Math.ceil((status.expiresAt - Date.now()) / 1000)) };
+  }
+  if (result !== "created") throw new Error("Invalid share store response");
+  return { id, token, ttlSeconds, expiresAt };
 }
 
 export async function getEntryShare(
@@ -224,40 +253,138 @@ export async function getEntryShare(
 ): Promise<EntryShareSnapshot | null> {
   const stored = await readEntryShare(id);
   if (!stored) return null;
-  const { content, fontId, fontSize, createdAt, sharedAt } = stored;
-  return { content, fontId, fontSize, createdAt, sharedAt };
+  // Management tokens never reach the public page.
+  const { content, fontId, fontSize, createdAt, sharedAt, sketches } = stored;
+  return { content, fontId, fontSize, createdAt, sharedAt, ...(sketches && { sketches }) };
 }
 
-export type EntryShareMutation = "ok" | "missing" | "denied";
+export type EntryShareMutation = "ok" | "missing" | "denied" | "conflict" | "limited";
+
+// Atomically compare the capability-verified record before mutating. In particular,
+// an update that races with a deletion can never recreate the deleted link.
+// An omitted expiry keeps the exact remaining TTL, including old records that
+// predate expiresAt. Explicit Never uses SET without EX, removing any old TTL.
+const MUTATE_ENTRY_SCRIPT = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return { 'missing' } end
+if raw ~= ARGV[1] then return { 'conflict' } end
+if ARGV[2] == 'delete' then
+  redis.call('SET', KEYS[2], ARGV[5])
+  redis.call('DEL', KEYS[1])
+  return { 'ok' }
+end
+local ttl = redis.call('PTTL', KEYS[1])
+if ttl == -2 or ttl == 0 then
+  redis.call('DEL', KEYS[1])
+  return { 'missing' }
+end
+if ARGV[4] ~= 'keep' then ttl = tonumber(ARGV[4]) end
+local now = redis.call('TIME')
+local nowMs = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+if ARGV[2] == 'status' then
+  if ttl < 0 then return { 'ok', -1 } end
+  return { 'ok', nowMs + ttl }
+end
+-- Add one top-level metadata field without round-tripping the content through
+-- Lua cjson, which turns empty drawing arrays into objects.
+local base = string.sub(ARGV[3], 1, -2)
+if ttl < 0 then
+  redis.call('SET', KEYS[1], base .. ',"expiresAt":null}')
+  return { 'ok', -1 }
+end
+local expiresAt = nowMs + ttl
+redis.call('SET', KEYS[1], base .. ',"expiresAt":' .. string.format('%.0f', expiresAt) .. '}', 'PX', ttl)
+return { 'ok', expiresAt }
+`;
+
+async function mutateEntryShare(
+  id: string,
+  token: string,
+  action: "update" | "expiry" | "delete" | "status",
+  snapshot?: EntryShareSnapshot,
+  expiry?: EntryShareExpiry,
+  ip = "unknown"
+): Promise<{ result: EntryShareMutation; expiresAt: number | null }> {
+  if (!SHARE_ID_PATTERN.test(id)) return { result: "missing", expiresAt: null };
+  if (!SHARE_ID_PATTERN.test(token)) return { result: "denied", expiresAt: null };
+  const raw = await redis(["GET", entryKey(id)]);
+  if (typeof raw !== "string") {
+    if (action === "delete") {
+      const result = await redis([
+        "EVAL",
+        `local owner = redis.call('GET', KEYS[2])
+if owner and owner ~= ARGV[1] then return 'denied' end
+if redis.call('EXISTS', KEYS[1]) == 1 then return 'conflict' end
+if not owner then
+  local count = redis.call('INCR', KEYS[3])
+  if count == 1 then redis.call('EXPIRE', KEYS[3], 3600) end
+  if count > tonumber(ARGV[2]) then return 'limited' end
+end
+redis.call('SET', KEYS[2], ARGV[1])
+return 'missing'`,
+        3, entryKey(id), ownerKey(id), `share-rl:${ip}`, tokenHash(token), MAX_SHARES_PER_IP_PER_HOUR,
+      ]);
+      if (result === "denied" || result === "conflict" || result === "limited") return { result, expiresAt: null };
+    }
+    return { result: "missing", expiresAt: null };
+  }
+  let stored: Record<string, unknown>;
+  try {
+    stored = JSON.parse(raw);
+    if (!stored || typeof stored !== "object" || typeof stored.token !== "string") throw new Error();
+  } catch {
+    return { result: "missing", expiresAt: null };
+  }
+  const expected = Buffer.from(stored.token as string);
+  const given = Buffer.from(token);
+  if (expected.length !== given.length || !timingSafeEqual(expected, given)) {
+    return { result: "denied", expiresAt: null };
+  }
+  // Remove old expiry metadata before the script writes the new value. Using
+  // the original JSON fields for expiry-only changes preserves the snapshot.
+  const next = snapshot ? { ...snapshot, token: stored.token } : { ...stored };
+  if ("expiresAt" in next) delete next.expiresAt;
+  const seconds = expiry === undefined ? undefined : entryShareTtlSeconds(expiry);
+  const response = await redis([
+    "EVAL", MUTATE_ENTRY_SCRIPT, 2, entryKey(id), ownerKey(id), raw, action,
+    JSON.stringify(next),
+    seconds === undefined ? "keep" : seconds === null ? -1 : seconds * 1000,
+    tokenHash(token),
+  ]);
+  if (!Array.isArray(response) || !["ok", "missing", "denied", "conflict"].includes(response[0])) {
+    throw new Error("Invalid share store response");
+  }
+  return {
+    result: response[0] as EntryShareMutation,
+    expiresAt: typeof response[1] === "number" && response[1] >= 0 ? response[1] : null,
+  };
+}
 
 export async function updateEntryShare(
   id: string,
   token: string,
-  snapshot: EntryShareSnapshot
-): Promise<{ result: EntryShareMutation; ttlSeconds: number }> {
-  const ttl = entryShareTtlSeconds();
-  const stored = await readEntryShare(id);
-  if (!stored) return { result: "missing", ttlSeconds: ttl };
-  if (!tokenMatches(stored.token, token)) {
-    return { result: "denied", ttlSeconds: ttl };
-  }
-  await redis([
-    "SET",
-    entryKey(id),
-    JSON.stringify({ ...snapshot, token: stored.token }),
-    "EX",
-    ttl,
-  ]);
-  return { result: "ok", ttlSeconds: ttl };
+  snapshot: EntryShareSnapshot,
+  expiry?: EntryShareExpiry
+): Promise<{ result: EntryShareMutation; expiresAt: number | null }> {
+  return mutateEntryShare(id, token, "update", snapshot, expiry);
+}
+
+export async function changeEntryShareExpiry(
+  id: string,
+  token: string,
+  expiry: EntryShareExpiry
+): Promise<{ result: EntryShareMutation; expiresAt: number | null }> {
+  return mutateEntryShare(id, token, "expiry", undefined, expiry);
+}
+
+export async function getEntryShareStatus(id: string, token: string) {
+  return mutateEntryShare(id, token, "status");
 }
 
 export async function deleteEntryShare(
   id: string,
-  token: string
+  token: string,
+  ip = "unknown"
 ): Promise<EntryShareMutation> {
-  const stored = await readEntryShare(id);
-  if (!stored) return "missing";
-  if (!tokenMatches(stored.token, token)) return "denied";
-  await redis(["DEL", entryKey(id)]);
-  return "ok";
+  return (await mutateEntryShare(id, token, "delete", undefined, undefined, ip)).result;
 }

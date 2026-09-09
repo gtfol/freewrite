@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
+import { parseEntryShareExpiry } from "@/lib/share-expiry";
 
 import {
   allowShare,
+  EntryShareCreateError,
+  SHARE_ID_PATTERN,
   entrySnapshotFromBody,
   putEntryShare,
   shareEnabled,
@@ -17,7 +20,7 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: Parameters<typeof entrySnapshotFromBody>[0];
+  let body: Parameters<typeof entrySnapshotFromBody>[0] & { expiresIn?: unknown; id?: unknown; token?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -32,6 +35,19 @@ export async function POST(request: Request) {
     );
   }
 
+  const expiry = parseEntryShareExpiry(body.expiresIn);
+  if (expiry === false) {
+    return NextResponse.json({ error: "Choose 7 days, 30 days, or Never" }, { status: 400 });
+  }
+
+  const hasCapability = body.id !== undefined || body.token !== undefined;
+  if ((hasCapability || expiry === "never") && (
+    typeof body.id !== "string" || !SHARE_ID_PATTERN.test(body.id) ||
+    typeof body.token !== "string" || !SHARE_ID_PATTERN.test(body.token)
+  )) {
+    return NextResponse.json({ error: "Save link controls before publishing" }, { status: 400 });
+  }
+
   const ip = (request.headers.get("x-forwarded-for") ?? "unknown")
     .split(",")[0]
     .trim();
@@ -44,9 +60,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const { id, token, ttlSeconds } = await putEntryShare(snapshot);
-    return NextResponse.json({ id, token, ttlSeconds });
-  } catch {
+    const result = await putEntryShare(snapshot, expiry, hasCapability ? { id: body.id as string, token: body.token as string } : undefined);
+    return NextResponse.json(result, { headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof EntryShareCreateError) return NextResponse.json({ error: error.message }, { status: error.status });
     return NextResponse.json(
       { error: "Couldn't create a share link" },
       { status: 502 }

@@ -182,8 +182,25 @@ export async function getEntry(id: string): Promise<Entry | undefined> {
 // Stamping here (not at call sites) guarantees every local mutation registers
 // as a change — a call site that forgets updatedAt can't silently break sync.
 export async function putEntry(entry: Entry): Promise<void> {
-  await put(ENTRIES, { ...entry, updatedAt: Date.now() });
-  await markDirty("entries", entry.id);
+  const db = await openDb();
+  const now = Date.now();
+  const tx = db.transaction([ENTRIES, OUTBOX], "readwrite");
+  let changed = false;
+  const current = tx.objectStore(ENTRIES).get(entry.id);
+  current.onsuccess = () => {
+    // A stale editor tab must not overwrite a deletion tombstone and make a
+    // removed entry eligible for publication again.
+    if ((current.result as Entry | undefined)?.deletedAt) return;
+    tx.objectStore(ENTRIES).put({ ...entry, updatedAt: now });
+    tx.objectStore(OUTBOX).put({ key: `entries:${entry.id}`, collection: "entries", id: entry.id, addedAt: now });
+    changed = true;
+  };
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+  if (changed) onLocalChange?.();
 }
 
 export async function deleteEntry(id: string): Promise<void> {

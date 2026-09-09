@@ -43,6 +43,8 @@ export function HistorySidebar() {
   const remove = useWriter((s) => s.remove);
 
   const [deleting, setDeleting] = useState<Entry | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   return (
     <>
@@ -106,7 +108,7 @@ export function HistorySidebar() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setDeleting(entry)}
+                      onClick={() => { setDeleteError(null); setDeleting(entry); }}
                       title="Delete entry"
                       className="text-muted-foreground transition-colors hover:text-destructive"
                     >
@@ -131,25 +133,37 @@ export function HistorySidebar() {
 
       <AlertDialog
         open={deleting !== null}
-        onOpenChange={(isOpen) => !isOpen && setDeleting(null)}
+        onOpenChange={(isOpen) => !isOpen && !deleteBusy && setDeleting(null)}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this entry?</AlertDialogTitle>
             <AlertDialogDescription>
               {deleting ? `"${entryPreview(deleting) || "Empty entry"}" — ` : ""}
-              this can&apos;t be undone.
+              this can&apos;t be undone. If shared, its link will be deleted too.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {deleteError && <p role="alert" className="text-sm text-muted-foreground">{deleteError}</p>}
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleteBusy}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => {
-                if (deleting) void remove(deleting.id);
-                setDeleting(null);
+              disabled={deleteBusy}
+              onClick={async (event) => {
+                event.preventDefault();
+                if (!deleting) return;
+                setDeleteBusy(true);
+                setDeleteError(null);
+                try {
+                  await remove(deleting.id);
+                  setDeleting(null);
+                } catch (error) {
+                  setDeleteError(error instanceof Error ? error.message : "Couldn't delete this entry. Try again.");
+                } finally {
+                  setDeleteBusy(false);
+                }
               }}
             >
-              Delete
+              {deleteBusy ? "Deleting…" : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
