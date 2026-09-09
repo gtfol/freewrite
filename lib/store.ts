@@ -6,6 +6,7 @@ import { persist } from "zustand/middleware";
 import {
   deleteEntry,
   deleteSketch,
+  getEntryRaw,
   listEntries,
   listEntriesRaw,
   listSketches,
@@ -20,7 +21,7 @@ import {
   WELCOME_CONTENT,
 } from "@/lib/entries";
 import { DEFAULT_FONT_ID, DEFAULT_FONT_SIZE } from "@/lib/fonts";
-import { revokeEntryShare } from "@/lib/shares";
+import { canDiscardUnsharedEntry, deleteSharedEntry, withShareLock } from "@/lib/shares";
 import { sweepSketches } from "@/lib/sketch";
 import type { Entry, Sketch } from "@/lib/types";
 
@@ -275,11 +276,22 @@ export const useWriter = create<WriterState>()((set, get) => ({
 
   init: async () => {
     const all = await listEntries();
-    const stale = all.filter(
-      (e) => !e.content.trim() && !isToday(e.createdAt)
-    );
-    await Promise.all(stale.map((e) => deleteEntry(e.id)));
-    const entries = all.filter((e) => !stale.includes(e));
+    const stale = new Set<string>();
+    try {
+      await withShareLock(async () => {
+        for (const entry of all) {
+          if (entry.content.trim() || isToday(entry.createdAt) || !canDiscardUnsharedEntry(entry.id)) continue;
+          const current = await getEntryRaw(entry.id);
+          if (!current || current.deletedAt || current.content.trim()) continue;
+          await deleteEntry(entry.id);
+          stale.add(entry.id);
+        }
+      });
+    } catch {
+      // Cleanup is optional. Keep entries and their controls if storage or
+      // browser locking is unavailable, including while working offline.
+    }
+    const entries = all.filter((e) => !stale.has(e.id));
 
     let currentId: string | null;
     if (entries.length === 0) {
@@ -388,12 +400,13 @@ export const useWriter = create<WriterState>()((set, get) => ({
   remove: async (id) => {
     // Keep both the entry and its management capability if revocation fails.
     // A link with no expiry cannot rely on a future TTL to disappear.
-    await revokeEntryShare(id);
-    if (pendingSave?.id === id) {
-      pendingSave = null;
-      if (saveTimeout) clearTimeout(saveTimeout);
-    }
-    await deleteEntry(id);
+    await deleteSharedEntry(id, async () => {
+      if (pendingSave?.id === id) {
+        pendingSave = null;
+        if (saveTimeout) clearTimeout(saveTimeout);
+      }
+      await deleteEntry(id);
+    });
     const entries = get().entries.filter((e) => e.id !== id);
 
     let { currentId } = get();

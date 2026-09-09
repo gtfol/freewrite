@@ -247,3 +247,14 @@ integration("metadata recovers an uncertain expiry change without publishing edi
   assert.equal((await getEntryShareStatus(link.id, "xxxxxxxxxxxxxxxxxxxxxx")).result, "denied");
   assert.deepEqual(await getEntryShare(link.id), snapshot);
 });
+
+integration("unknown-id retirement is rate limited without blocking existing-link revocation", async () => {
+  const ip = "tombstone-limit-test";
+  command(["SET", `share-rl:${ip}`, 60, "EX", 3600]);
+  const unknown = { id: "gggggggggggggggggggggg", token: "hhhhhhhhhhhhhhhhhhhhhh" };
+  assert.equal(await deleteEntryShare(unknown.id, unknown.token, ip), "limited");
+  assert.equal(command(["EXISTS", `share:entry-owner:${unknown.id}`]), 0);
+  const link = await putEntryShare(snapshot, "never");
+  assert.equal(await deleteEntryShare(link.id, link.token, ip), "ok");
+  assert.equal(await deleteEntryShare(link.id, link.token, ip), "missing");
+});

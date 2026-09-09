@@ -27,6 +27,7 @@ function unavailable() {
 }
 
 function mutationError(result: Exclude<EntryShareMutation, "ok">) {
+  if (result === "limited") return NextResponse.json({ error: "Too many new links right now — try again later" }, { status: 429 });
   if (result === "conflict") {
     return NextResponse.json({ error: "This link changed in another tab. Try again." }, { status: 409 });
   }
@@ -111,7 +112,8 @@ export async function DELETE(
   }
 
   try {
-    const result = await deleteEntryShare(id, token);
+    const ip = (request.headers.get("x-forwarded-for") ?? "unknown").split(",")[0].trim();
+    const result = await deleteEntryShare(id, token, ip);
     if (result !== "ok") return mutationError(result);
     return NextResponse.json({ ok: true });
   } catch {

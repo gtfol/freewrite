@@ -101,24 +101,35 @@ export function getShareRecord(entryId: string, strict = false): ShareRecord | n
   return record ?? null;
 }
 
+export function canDiscardUnsharedEntry(entryId: string): boolean {
+  try { return getShareRecord(entryId, true) === null; }
+  catch { return false; }
+}
+
 export function shareRecordIsSaved(entryId: string): boolean {
   return !pending.has(entryId);
 }
 
 export function setShareRecord(entryId: string, record: ShareRecord): void {
   if (!validRecord(record)) throw new Error("The share link couldn't be read. Try again.");
-  const existing = getShareRecord(entryId, true);
-  if (existing && existing.id !== record.id) throw new Error("This entry already has a share link. Check its controls before creating another.");
+  const records = readAll(true);
+  const existing = records[entryId];
+  if (existing && (existing.id !== record.id || existing.token !== record.token)) throw new Error("This entry already has a share link. Check its controls before creating another.");
   // Keep the capability available for retry / revoke even if durable storage
   // fails after the server has already created or changed the link.
   pending.set(entryId, record);
-  writeAll({ ...readAll(true), ...Object.fromEntries(pending) });
-  pending.clear();
+  writeAll({ ...records, [entryId]: record });
+  pending.delete(entryId);
 }
 
 export function clearShareRecord(entryId: string, expectedId?: string): void {
   const records = readAll(true);
-  if (expectedId && records[entryId] && records[entryId].id !== expectedId) return;
+  if (expectedId && records[entryId] && records[entryId].id !== expectedId) {
+    // An unpublished local reservation can lose a race to another tab after
+    // storage failed. Retire only that reservation, keeping the durable link.
+    if (pending.get(entryId)?.id === expectedId) pending.delete(entryId);
+    return;
+  }
   if (expectedId && pending.has(entryId) && pending.get(entryId)!.id !== expectedId) return;
   delete records[entryId];
   writeAll(records);
@@ -136,11 +147,7 @@ export function expiresLabel(expiresAt: number | null, now = Date.now()): string
   return days === 1 ? "1 day" : `${days} days`;
 }
 
-export async function revokeEntryShare(entryId: string, expectedId?: string): Promise<void> {
-  // A user can open History while publication is still in flight. Wait for
-  // its token to be saved before revoking / removing the underlying entry.
-  await mutations.get(entryId);
-  return withShareLock(async () => {
+async function revokeEntryShareUnlocked(entryId: string, expectedId?: string): Promise<void> {
   const share = getShareRecord(entryId, true);
   if (!share) return;
   if (expectedId && share.id !== expectedId) throw new Error("This entry's share link changed. Check its controls and try again.");
@@ -158,5 +165,19 @@ export async function revokeEntryShare(entryId: string, expectedId?: string): Pr
     throw new Error("Couldn't delete the share link. Try again before deleting this entry.");
   }
   clearShareRecord(entryId, share.id);
+}
+
+export async function revokeEntryShare(entryId: string, expectedId?: string): Promise<void> {
+  await mutations.get(entryId);
+  return withShareLock(() => revokeEntryShareUnlocked(entryId, expectedId));
+}
+
+export async function deleteSharedEntry(entryId: string, deleteLocal: () => Promise<void>): Promise<void> {
+  await mutations.get(entryId);
+  return withShareLock(async () => {
+    await revokeEntryShareUnlocked(entryId);
+    // Publication checks durable entry existence under this same lock, so no
+    // other tab can insert a new link between revocation and local deletion.
+    await deleteLocal();
   });
 }

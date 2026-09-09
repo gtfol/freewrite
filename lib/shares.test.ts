@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import {
-  assertShareStorage, beginEntryShareMutation, clearShareRecord, expiresLabel, getShareRecord,
+  assertShareStorage, beginEntryShareMutation, canDiscardUnsharedEntry, clearShareRecord, expiresLabel, getShareRecord,
   hasPendingShareRecords, prepareShareRecord, revokeEntryShare, setShareRecord, shareRecordIsSaved,
   type ShareRecord,
 } from "./shares.ts";
@@ -163,4 +163,40 @@ test("an elapsed ownership record is never overwritten by another create attempt
   const elapsed = { ...record, expiresAt: Date.now() - 1000 };
   setShareRecord("entry", elapsed);
   assert.deepEqual(prepareShareRecord("entry", 3000, "never"), elapsed);
+});
+
+
+test("a failed local reservation cannot overwrite another tab's durable link", () => {
+  failWrite = true;
+  assert.throws(() => setShareRecord("entry", record));
+  const newer = { ...record, id: "xxxxxxxxxxxxxxxxxxxxxx", token: "yyyyyyyyyyyyyyyyyyyyyy" };
+  values.set(key, JSON.stringify({ entry: newer }));
+  failWrite = false;
+  assert.throws(() => setShareRecord("entry", record), /already has a share link/);
+  clearShareRecord("entry", record.id);
+  assert.deepEqual(getShareRecord("entry"), newer);
+  assert.equal(hasPendingShareRecords(), false);
+});
+
+
+test("saving another entry neither flushes nor loses unrelated pending controls", () => {
+  failWrite = true;
+  assert.throws(() => setShareRecord("entry", record));
+  const newer = { ...record, id: "xxxxxxxxxxxxxxxxxxxxxx", token: "yyyyyyyyyyyyyyyyyyyyyy" };
+  values.set(key, JSON.stringify({ entry: newer }));
+  failWrite = false;
+  setShareRecord("other", record);
+  assert.deepEqual(JSON.parse(values.get(key)!).entry, newer);
+  assert.equal(shareRecordIsSaved("entry"), false);
+  clearShareRecord("entry", record.id);
+  assert.deepEqual(getShareRecord("entry"), newer);
+});
+
+
+test("automatic empty-entry cleanup retains shared entries and fails closed on unreadable controls", () => {
+  assert.equal(canDiscardUnsharedEntry("entry"), true);
+  setShareRecord("entry", { ...record, expiresAt: Date.now() - 1000 });
+  assert.equal(canDiscardUnsharedEntry("entry"), false);
+  failRead = true;
+  assert.equal(canDiscardUnsharedEntry("other"), false);
 });

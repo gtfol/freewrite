@@ -258,7 +258,7 @@ export async function getEntryShare(
   return { content, fontId, fontSize, createdAt, sharedAt, ...(sketches && { sketches }) };
 }
 
-export type EntryShareMutation = "ok" | "missing" | "denied" | "conflict";
+export type EntryShareMutation = "ok" | "missing" | "denied" | "conflict" | "limited";
 
 // Atomically compare the capability-verified record before mutating. In particular,
 // an update that races with a deletion can never recreate the deleted link.
@@ -302,7 +302,8 @@ async function mutateEntryShare(
   token: string,
   action: "update" | "expiry" | "delete" | "status",
   snapshot?: EntryShareSnapshot,
-  expiry?: EntryShareExpiry
+  expiry?: EntryShareExpiry,
+  ip = "unknown"
 ): Promise<{ result: EntryShareMutation; expiresAt: number | null }> {
   if (!SHARE_ID_PATTERN.test(id)) return { result: "missing", expiresAt: null };
   if (!SHARE_ID_PATTERN.test(token)) return { result: "denied", expiresAt: null };
@@ -311,10 +312,19 @@ async function mutateEntryShare(
     if (action === "delete") {
       const result = await redis([
         "EVAL",
-        "local owner = redis.call('GET', KEYS[2]); if owner and owner ~= ARGV[1] then return 'denied' end; if redis.call('EXISTS', KEYS[1]) == 1 then return 'conflict' end; redis.call('SET', KEYS[2], ARGV[1]); return 'missing'",
-        2, entryKey(id), ownerKey(id), tokenHash(token),
+        `local owner = redis.call('GET', KEYS[2])
+if owner and owner ~= ARGV[1] then return 'denied' end
+if redis.call('EXISTS', KEYS[1]) == 1 then return 'conflict' end
+if not owner then
+  local count = redis.call('INCR', KEYS[3])
+  if count == 1 then redis.call('EXPIRE', KEYS[3], 3600) end
+  if count > tonumber(ARGV[2]) then return 'limited' end
+end
+redis.call('SET', KEYS[2], ARGV[1])
+return 'missing'`,
+        3, entryKey(id), ownerKey(id), `share-rl:${ip}`, tokenHash(token), MAX_SHARES_PER_IP_PER_HOUR,
       ]);
-      if (result === "denied" || result === "conflict") return { result, expiresAt: null };
+      if (result === "denied" || result === "conflict" || result === "limited") return { result, expiresAt: null };
     }
     return { result: "missing", expiresAt: null };
   }
@@ -373,7 +383,8 @@ export async function getEntryShareStatus(id: string, token: string) {
 
 export async function deleteEntryShare(
   id: string,
-  token: string
+  token: string,
+  ip = "unknown"
 ): Promise<EntryShareMutation> {
-  return (await mutateEntryShare(id, token, "delete")).result;
+  return (await mutateEntryShare(id, token, "delete", undefined, undefined, ip)).result;
 }

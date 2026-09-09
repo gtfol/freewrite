@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { isWelcomeEntry } from "@/lib/entries";
+import { getEntryRaw } from "@/lib/db";
 import { DEFAULT_ENTRY_SHARE_EXPIRY, type EntryShareExpiry } from "@/lib/share-expiry";
 import { referencedIds } from "@/lib/sketch";
 import {
@@ -97,6 +98,9 @@ export function SharePopover() {
     try {
       await withShareLock(async () => {
         assertShareStorage();
+        const durableEntry = await getEntryRaw(entry.id);
+        if (!durableEntry) throw new Error("Wait until the entry is saved, then try again.");
+        if (durableEntry.deletedAt) throw new Error("This entry was deleted in another tab. Create a new entry to share it.");
         const prepared = prepareShareRecord(entry.id, entry.updatedAt, expiry === "keep" ? DEFAULT_ENTRY_SHARE_EXPIRY : expiry);
         if (!prepared.pendingCreate) { setPanelState(prepared); return; }
         setPanelState(prepared);
@@ -173,7 +177,7 @@ export function SharePopover() {
       await revokeEntryShare(entry.id, record.id);
       setPanelState(null);
     } catch (error) {
-      setPanelState(record, error instanceof Error ? error.message : "Couldn't delete the link", expiry);
+      setPanelState(getShareRecord(entry.id) ?? record, error instanceof Error ? error.message : "Couldn't delete the link", expiry);
     } finally {
       setBusy(null);
     }
@@ -196,6 +200,8 @@ export function SharePopover() {
     setBusy("check");
     try {
       await withShareLock(async () => {
+        const current = getShareRecord(entry.id, true);
+        if (!current || current.id !== record.id) throw new Error("This entry's share link changed. Check its controls and try again.");
         const res = await fetch(`/api/share/entry/${record.id}`, {
           headers: { "x-share-token": record.token }, cache: "no-store", signal: AbortSignal.timeout(15_000),
         });
