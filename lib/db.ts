@@ -1,13 +1,14 @@
 import type { Article, Entry, Sketch } from "@/lib/types";
 
 const DB_NAME = "freewrite";
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 const ENTRIES = "entries";
 const ARTICLES = "articles";
 const SKETCHES = "sketches";
 const OUTBOX = "outbox";
 const SYNCMETA = "syncmeta";
+const PDFS = "pdfs";
 
 // Device-local stores: generated audio and its manifests. Nothing here ever
 // calls markDirty, so none of it reaches the outbox, the manifest, or the
@@ -86,6 +87,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(AUDIOBOOKS)) {
         db.createObjectStore(AUDIOBOOKS, { keyPath: "articleId" });
+      }
+      if (!db.objectStoreNames.contains(PDFS)) {
+        db.createObjectStore(PDFS, { keyPath: "articleId" });
       }
     };
 
@@ -210,6 +214,31 @@ export async function putArticle(article: Article): Promise<void> {
   await markDirty("articles", article.id);
 }
 
+export interface LocalPdf { articleId: string; name: string; file: Blob; }
+export const getPdfOriginal = (articleId: string) => get<LocalPdf>(PDFS, articleId);
+
+// The article, original file, and sync marker commit together. Quota failure
+// must not leave a half-imported article or silently discard its original.
+export async function putPdfArticle(article: Article, original: File): Promise<void> {
+  const db = await openDb();
+  const now = Date.now();
+  const tx = db.transaction([ARTICLES, PDFS, OUTBOX], "readwrite");
+  try {
+    tx.objectStore(ARTICLES).put({ ...article, updatedAt: now });
+    tx.objectStore(PDFS).put({ articleId: article.id, name: original.name, file: original });
+    tx.objectStore(OUTBOX).put({ key: `articles:${article.id}`, collection: "articles", id: article.id, addedAt: now });
+  } catch (error) {
+    tx.abort();
+    throw error;
+  }
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+  onLocalChange?.();
+}
+
 export async function deleteArticle(id: string): Promise<void> {
   const current = await get<Article>(ARTICLES, id);
   if (!current || current.deletedAt) return;
@@ -221,6 +250,7 @@ export async function deleteArticle(id: string): Promise<void> {
     deletedAt: now,
   });
   await markDirty("articles", id);
+  await hardDelete(PDFS, id);
 }
 
 function normalizeSketch(s: Sketch): Sketch {
@@ -280,7 +310,10 @@ export async function listArticlesRaw(): Promise<Article[]> {
 }
 
 export const applyRemoteEntry = (entry: Entry) => put(ENTRIES, entry);
-export const applyRemoteArticle = (article: Article) => put(ARTICLES, article);
+export async function applyRemoteArticle(article: Article) {
+  await put(ARTICLES, article);
+  if (article.deletedAt) await hardDelete(PDFS, article.id);
+}
 export const applyRemoteSketch = (sketch: Sketch) => put(SKETCHES, sketch);
 
 export const listOutbox = () => getAll<OutboxItem>(OUTBOX);

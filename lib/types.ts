@@ -47,7 +47,7 @@ export type ExtractSource = "direct" | "render" | "paste";
 
 // "archive" and "freedium" only survive as labels for articles saved while
 // those fallbacks existed; nothing produces them now.
-export type ArticleVia = "archive" | "render" | "paste" | "freedium" | null;
+export type ArticleVia = "archive" | "render" | "paste" | "freedium" | "pdf" | null;
 
 // A reader annotation: the exact quoted text plus a little surrounding
 // context (a text-quote anchor, re-anchored against the rendered article at

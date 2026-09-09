@@ -121,8 +121,9 @@ function ArticleChatPopover({ article }: { article: Article }) {
             <>
               <div className="my-1 h-px bg-border" />
               <p className="px-3 py-2 text-xs text-muted-foreground">
-                The article is too long to send as a link, so those open with
-                the title + URL. To paste the full text instead:
+                {article.url
+                  ? "The article is too long to send as a link, so those open with the title + URL. To paste the full text instead:"
+                  : "This PDF has no public link. Copy the full prompt, then paste it into your chat:"}
               </p>
               <button className={optionClass} onClick={() => copy("chatgpt")}>
                 {copied === "chatgpt" ? "Copied" : "Copy full prompt"}
@@ -153,12 +154,14 @@ export interface ListenControls {
 
 export function ReaderNav({
   article,
+  originalUrl,
   onDelete,
   trim,
   listen,
   banner,
 }: {
   article?: Article;
+  originalUrl?: string | null;
   onDelete?: () => void;
   trim?: TrimControls;
   listen?: ListenControls;
@@ -233,15 +236,17 @@ export function ReaderNav({
               </>
             )}
             <ArticleChatPopover article={article} />
+            {(originalUrl ?? article.url) && <>
             <Dot />
             <a
-              href={article.url}
+              href={originalUrl ?? article.url}
               target="_blank"
               rel="noreferrer noopener"
               className={itemClass}
             >
               Original
             </a>
+            </>}
             {trim && (
               <>
                 <Dot />

@@ -2,7 +2,7 @@
 
 a web version of [freewrite](https://github.com/farzaa/freewrite) — write for 15 minutes. don't stop. don't edit.
 
-plus a small reader: paste a link, read it clean.
+plus a small reader: paste a link or choose a PDF, read it clean.
 
 everything is saved locally in your browser. nothing leaves your machine, except the links you ask the reader to fetch.
 
@@ -12,6 +12,14 @@ everything is saved locally in your browser. nothing leaves your machine, except
 npm install
 npm run dev
 ```
+
+## local PDFs
+
+in Read, choose a PDF or drop one onto the import area. PDF.js extracts its text in your browser; edit the title and text preview, then save. progress and cancel are available while extracting. saved text works with Listen, highlights, and Trim.
+
+imports accept selectable-text PDFs up to 20 MB, 300 pages, and 250,000 text characters. scanned PDFs need text recognition in another app first; password-protected files need an unlocked copy. columns and tables may need editing in the preview.
+
+the original PDF stays in IndexedDB on the importing device, where **Original** opens it. optional sync transfers the extracted text and article metadata, not the file; other devices can read and listen without the original. deleting the article also removes its local original. PDF.js worker and font assets are served by this app, with no document uploads to an extraction service. no new SQL migration or environment variables are needed.
 
 ## listen
 

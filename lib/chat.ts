@@ -62,7 +62,7 @@ interface ArticleSource {
 
 function articleHeader(article: ArticleSource): string {
   const by = article.byline ? ` — by ${article.byline}` : "";
-  return `"${article.title}"${by}\n${article.url}`;
+  return `"${article.title}"${by}${article.url ? `\n${article.url}` : ""}`;
 }
 
 export function articlePromptFull(article: ArticleSource): string {
@@ -70,6 +70,7 @@ export function articlePromptFull(article: ArticleSource): string {
 }
 
 export function articlePromptLink(article: ArticleSource): string {
+  if (!article.url) return `${READER_PROMPT}\n\n${articleHeader(article)}\n\n(This document is saved locally. I'll paste its text in my next message.)`;
   return `${READER_PROMPT}\n\n${articleHeader(article)}\n\n(full text is at the link — read it first.)`;
 }
 
@@ -78,7 +79,8 @@ export function articlePromptShared(
   shareUrl: string,
   ttlMinutes: number
 ): string {
-  return `${READER_PROMPT}\n\n${articleHeader(article)}\n\nread the full text here first: ${shareUrl}\n(that's a temporary snapshot of my saved copy — it expires in about ${ttlMinutes} minutes. the url above it is the original source, for reference only.)`;
+  const sourceNote = article.url ? " the url above it is the original source, for reference only." : "";
+  return `${READER_PROMPT}\n\n${articleHeader(article)}\n\nread the full text here first: ${shareUrl}\n(that's a temporary snapshot of my saved copy — it expires in about ${ttlMinutes} minutes.${sourceNote})`;
 }
 
 export function articleChatUrl(

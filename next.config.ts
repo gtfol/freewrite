@@ -2,6 +2,13 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["pg"],
+  outputFileTracingIncludes: {
+    "/api/pdf-assets/*": [
+      "./node_modules/pdfjs-dist/build/pdf.worker.min.mjs",
+      "./node_modules/pdfjs-dist/cmaps/*.bcmap",
+      "./node_modules/pdfjs-dist/standard_fonts/*",
+    ],
+  },
   // The Piper phonemizer is Emscripten output that ships one bundle for Node
   // and the browser, referencing `fs`/`path` behind a runtime isNode check that
   // is never true here. Nothing to refactor — the imports are in third-party

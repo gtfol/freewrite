@@ -33,6 +33,7 @@ export function sourceToVia(source: ExtractSource): ArticleVia {
 }
 
 export function viaLabel(via: ArticleVia): string | null {
+  if (via === "pdf") return "PDF";
   if (via === "archive") return "via archive.ph";
   if (via === "render") return "via r.jina.ai";
   if (via === "paste") return "pasted";

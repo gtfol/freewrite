@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { ReaderNav } from "@/components/reader-nav";
+import { PdfImporter } from "@/components/pdf-importer";
 import { useMounted } from "@/hooks/use-mounted";
 import {
   articleDate,
@@ -27,7 +28,7 @@ import {
   viaLabel,
   type PastedClipboard,
 } from "@/lib/articles";
-import { deleteArticle, listArticles, putArticle } from "@/lib/db";
+import { deleteArticle, listArticles, putArticle, putPdfArticle } from "@/lib/db";
 import { SYNC_APPLIED_EVENT } from "@/lib/sync";
 import { collectGarbage } from "@/lib/tts/store";
 import type { Article, ExtractedArticle, ExtractSource } from "@/lib/types";
@@ -87,6 +88,7 @@ export default function ReadPage() {
   const mounted = useMounted();
   const [articles, setArticles] = useState<Article[] | null>(null);
   const [input, setInput] = useState("");
+  const [pdfActive, setPdfActive] = useState(false);
   const [state, setState] = useState<AddState>({ kind: "idle" });
   const [deleting, setDeleting] = useState<Article | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; draft: string } | null>(
@@ -176,16 +178,23 @@ export default function ReadPage() {
             onChange={(e) => setInput(e.target.value)}
             placeholder="Paste a link — an article, a twitter post, a pdf, an arXiv paper"
             className="h-10 border-0 border-b border-border rounded-none px-0 shadow-none focus-visible:ring-0 focus-visible:border-foreground/40"
-            disabled={state.kind === "loading"}
+            disabled={state.kind === "loading" || pdfActive}
           />
           <button
             type="submit"
-            disabled={state.kind === "loading" || !input.trim()}
+            disabled={state.kind === "loading" || pdfActive || !input.trim()}
             className={cn(actionClass, "disabled:opacity-40")}
           >
             {state.kind === "loading" ? LOADING_LABELS[state.source] : "Save"}
           </button>
         </form>
+
+        <PdfImporter disabled={state.kind === "loading"} onActiveChange={setPdfActive}
+          onSave={async (data, file) => {
+            const article = toArticle(data, "pdf");
+            await putPdfArticle(article, file);
+            setArticles((previous) => [article, ...(previous ?? [])]);
+          }} />
 
         {state.kind === "error" && (
           <div className="mt-4 text-[13px] text-muted-foreground">
@@ -345,7 +354,7 @@ export default function ReadPage() {
           })}
           {articles?.length === 0 && (
             <li className="py-4 text-[13px] text-muted-foreground">
-              Nothing saved yet. Paste a link above.
+              Nothing saved yet. Paste a link or choose a PDF above.
             </li>
           )}
         </ul>

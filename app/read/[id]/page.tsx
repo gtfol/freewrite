@@ -29,6 +29,7 @@ import {
 } from "@/lib/articles";
 import { deleteArticle, getArticle, putArticle } from "@/lib/db";
 import { SYNC_APPLIED_EVENT } from "@/lib/sync";
+import { useArticleOriginal } from "@/hooks/use-article-original";
 import type { Article, Highlight } from "@/lib/types";
 
 interface TrimSession {
@@ -47,6 +48,7 @@ export default function ArticlePage({
   const { id } = use(params);
   const router = useRouter();
   const [article, setArticle] = useState<Article | null | undefined>(undefined);
+  const originalUrl = useArticleOriginal(article);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [trim, setTrim] = useState<TrimSession | null>(null);
   // Mounting the transport is what loads the model and starts synthesis, so
@@ -226,15 +228,15 @@ export default function ArticlePage({
           <ArticleTitle title={article.title} onRename={rename} />
           <p className="mt-3 font-sans text-xs text-muted-foreground">
             {meta}
-            {meta && " · "}
-            <a
-              href={article.url}
+            {meta && originalUrl && " · "}
+            {originalUrl && <a
+              href={originalUrl}
               target="_blank"
               rel="noreferrer noopener"
               className="underline underline-offset-2 transition-colors hover:text-foreground"
             >
               original
-            </a>
+            </a>}
           </p>
           {trim ? (
             <div className="reader mt-10 select-none">
@@ -277,6 +279,7 @@ export default function ArticlePage({
 
       <ReaderNav
         article={article}
+        originalUrl={originalUrl}
         onDelete={() => setConfirmingDelete(true)}
         trim={trimControls}
         listen={{
