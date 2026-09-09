@@ -27,7 +27,10 @@ fully local by default. to sync across devices:
 
 1. create a supabase project, run `db/schema.sql` in its sql editor
 2. set `DATABASE_URL` (transaction pooler string), `BETTER_AUTH_SECRET` (`openssl rand -base64 32`), and `BETTER_AUTH_URL` (your deployment url)
-3. redeploy — a cloud icon appears in the nav
+3. download the database CA certificate from supabase's **Database → Settings → SSL Configuration** and set `DATABASE_SSL_CA` to the entire certificate text, including the `BEGIN CERTIFICATE` and `END CERTIFICATE` lines. actual line breaks and literal `\n` escapes both work. set this in vercel before deploying the app
+4. redeploy — a cloud icon appears in the nav
+
+remote database connections verify the server's certificate and hostname. `DATABASE_SSL_CA` supplies supabase's trusted root; databases using a publicly trusted certificate can leave it unset. connection URL query options such as `sslmode=require` cannot override verification. only the exact loopback hosts `localhost`, `127.0.0.1`, and `::1` use an unencrypted connection for local development.
 
 ## sharing (optional)
 
