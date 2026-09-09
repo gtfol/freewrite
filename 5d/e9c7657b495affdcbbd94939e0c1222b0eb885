@@ -1,0 +1,30 @@
+app/api/share/entry/[id]/route.ts
+  h_606d960bac5d85 30,115-116
+components/share-popover.tsx
+  h_606d960bac5d85 7,101-103,180,203-204
+lib/db.ts
+  h_606d960bac5d85 185-203
+lib/entry-share-deletion.test.ts
+  h_606d960bac5d85 1-25
+lib/share.test.ts
+  h_606d960bac5d85 250-260
+lib/share.ts
+  h_606d960bac5d85 261,305-306,315-325,327,386-387,389
+lib/shares.test.ts
+  h_606d960bac5d85 4,167-202
+lib/shares.ts
+  h_606d960bac5d85 104-108,115-117,121-122,127-132,150,168-181
+lib/store.ts
+  h_606d960bac5d85 9,24,279-294,403-409
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "5de9c7657b495affdcbbd94939e0c1222b0eb885",
+  "prompts": {},
+  "humans": {
+    "h_606d960bac5d85": {
+      "author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
