@@ -1,0 +1,28 @@
+README.md
+  h_606d960bac5d85 53,55
+app/api/share/entry/[id]/route.ts
+  h_606d960bac5d85 9,156-170
+app/api/share/entry/route.ts
+  h_606d960bac5d85 6-7,23,43-50,63,65-66
+components/share-popover.tsx
+  h_606d960bac5d85 16,21,28,45,98-107,110-114,117,122,136-144,148,160,173,182,185-188,194-220,238,242,251,272,275,279-284,286,288,292,306
+lib/share.test.ts
+  h_606d960bac5d85 13,213-249
+lib/share.ts
+  h_606d960bac5d85 1,195-219,222-223,225-229,232-234,236-247,272,284-287,303,310-320,339,342,370-373
+lib/shares.test.ts
+  h_606d960bac5d85 5,60,135-166
+lib/shares.ts
+  h_606d960bac5d85 1-2,13-14,32-52,99-101,110-111,119,121-122,132,134-135,139,143,146,160-161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "29f5c01d3b98b3c571ab457ca505e959fa4c3964",
+  "prompts": {},
+  "humans": {
+    "h_606d960bac5d85": {
+      "author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
