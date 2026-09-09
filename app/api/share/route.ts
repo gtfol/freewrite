@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
+import { DEFAULT_ENTRY_SHARE_EXPIRY, ENTRY_SHARE_EXPIRIES, entryShareTtlSeconds } from "@/lib/share-expiry";
 
 import {
   allowShare,
-  entryShareTtlSeconds,
   putShare,
   shareEnabled,
 } from "@/lib/share";
@@ -16,6 +16,8 @@ export async function GET() {
   return NextResponse.json({
     enabled: shareEnabled(),
     entryTtlSeconds: entryShareTtlSeconds(),
+    defaultEntryExpiry: DEFAULT_ENTRY_SHARE_EXPIRY,
+    entryExpiries: ENTRY_SHARE_EXPIRIES,
   });
 }
 

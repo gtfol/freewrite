@@ -20,7 +20,7 @@ import {
   WELCOME_CONTENT,
 } from "@/lib/entries";
 import { DEFAULT_FONT_ID, DEFAULT_FONT_SIZE } from "@/lib/fonts";
-import { clearShareRecord, getShareRecord } from "@/lib/shares";
+import { revokeEntryShare } from "@/lib/shares";
 import { sweepSketches } from "@/lib/sketch";
 import type { Entry, Sketch } from "@/lib/types";
 
@@ -386,19 +386,12 @@ export const useWriter = create<WriterState>()((set, get) => ({
   },
 
   remove: async (id) => {
+    // Keep both the entry and its management capability if revocation fails.
+    // A link with no expiry cannot rely on a future TTL to disappear.
+    await revokeEntryShare(id);
     if (pendingSave?.id === id) {
       pendingSave = null;
       if (saveTimeout) clearTimeout(saveTimeout);
-    }
-    // Deleting an entry unpublishes it too — best effort; worst case the
-    // public snapshot just lives out its TTL.
-    const share = getShareRecord(id);
-    if (share) {
-      void fetch(`/api/share/entry/${share.id}`, {
-        method: "DELETE",
-        headers: { "x-share-token": share.token },
-      }).catch(() => {});
-      clearShareRecord(id);
     }
     await deleteEntry(id);
     const entries = get().entries.filter((e) => e.id !== id);

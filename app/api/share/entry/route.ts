@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseEntryShareExpiry } from "@/lib/share-expiry";
 
 import {
   allowShare,
@@ -17,7 +18,7 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: Parameters<typeof entrySnapshotFromBody>[0];
+  let body: Parameters<typeof entrySnapshotFromBody>[0] & { expiresIn?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -32,6 +33,11 @@ export async function POST(request: Request) {
     );
   }
 
+  const expiry = parseEntryShareExpiry(body.expiresIn);
+  if (expiry === false) {
+    return NextResponse.json({ error: "Choose 7 days, 30 days, or Never" }, { status: 400 });
+  }
+
   const ip = (request.headers.get("x-forwarded-for") ?? "unknown")
     .split(",")[0]
     .trim();
@@ -44,8 +50,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const { id, token, ttlSeconds } = await putEntryShare(snapshot);
-    return NextResponse.json({ id, token, ttlSeconds });
+    const result = await putEntryShare(snapshot, expiry);
+    return NextResponse.json(result, { headers: { "cache-control": "no-store" } });
   } catch {
     return NextResponse.json(
       { error: "Couldn't create a share link" },

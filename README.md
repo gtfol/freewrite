@@ -4,7 +4,7 @@ a web version of [freewrite](https://github.com/farzaa/freewrite) — write for 
 
 plus a small reader: paste a link or choose a PDF, read it clean.
 
-everything is saved locally in your browser. nothing leaves your machine, except the links you ask the reader to fetch.
+everything is saved locally in your browser. syncing, sharing, and fetching article links send data only when you choose those features.
 
 ## dev
 
@@ -12,6 +12,8 @@ everything is saved locally in your browser. nothing leaves your machine, except
 npm install
 npm run dev
 ```
+
+`npm test` runs the test suite. install `redis-server` and `redis-cli` to include the isolated share-store integration tests; those tests skip when Redis is unavailable.
 
 ## local PDFs
 
@@ -46,9 +48,13 @@ entries can be published as read-only pages (`share` in the nav), and the reader
 
 1. create an upstash redis (or vercel kv) database
 2. set `KV_REST_API_URL` + `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`)
-3. optional: `SHARE_ENTRY_TTL_SECONDS` — how long entry links live (default 30 days)
+entry links default to **7 days**. the Share popover offers **7 days**, **30 days**, and **Never**. choose an expiry when creating a link, or use **Save expiry** on an existing link. expiry changes preserve the published snapshot; **Update link** publishes the current entry while preserving its remaining lifetime. existing links keep their current expiry until explicitly changed. the former `SHARE_ENTRY_TTL_SECONDS` setting is no longer used.
 
-links are unlisted (random 128-bit ids), noindexed, and expire on their own. the create/update/delete secret never leaves the author's browser.
+links are unlisted (random 128-bit ids) and noindexed. timed links are removed by Redis expiry. Never links remain until the author deletes them (or the backing store is removed); changing a timed link to Never removes its Redis TTL. no database migration or new environment variable is required.
+
+the management token is kept in the author's browser and sent only to the server when updating or deleting that link; it is never included in the public URL or page. clearing browser data loses those controls. storage failures are reported, with a retry/delete path. deleting a shared entry first revokes its link; if that fails, the entry and its controls stay available for another attempt.
+
+the reader's temporary chat snapshots are separate: they still expire after 30 minutes by default (`SHARE_TTL_SECONDS`, 60 seconds to 24 hours). changing entry-link expiry does not affect them.
 
 ## song of the day (optional)
 

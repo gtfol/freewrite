@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { parseEntryShareExpiry } from "@/lib/share-expiry";
 
 import {
   allowShare,
+  changeEntryShareExpiry,
   deleteEntryShare,
   entrySnapshotFromBody,
   shareEnabled,
@@ -24,6 +26,9 @@ function unavailable() {
 }
 
 function mutationError(result: Exclude<EntryShareMutation, "ok">) {
+  if (result === "conflict") {
+    return NextResponse.json({ error: "This link changed in another tab. Try again." }, { status: 409 });
+  }
   return result === "missing"
     ? NextResponse.json(
         { error: "This share link has expired or was deleted" },
@@ -49,7 +54,7 @@ export async function PUT(
     return NextResponse.json({ error: "Not allowed" }, { status: 403 });
   }
 
-  let body: Parameters<typeof entrySnapshotFromBody>[0];
+  let body: Parameters<typeof entrySnapshotFromBody>[0] & { expiresIn?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -64,6 +69,11 @@ export async function PUT(
     );
   }
 
+  const expiry = parseEntryShareExpiry(body.expiresIn);
+  if (expiry === false) {
+    return NextResponse.json({ error: "Choose 7 days, 30 days, or Never" }, { status: 400 });
+  }
+
   const ip = (request.headers.get("x-forwarded-for") ?? "unknown")
     .split(",")[0]
     .trim();
@@ -76,9 +86,9 @@ export async function PUT(
       );
     }
 
-    const { result, ttlSeconds } = await updateEntryShare(id, token, snapshot);
+    const { result, expiresAt } = await updateEntryShare(id, token, snapshot, expiry);
     if (result !== "ok") return mutationError(result);
-    return NextResponse.json({ ttlSeconds });
+    return NextResponse.json({ expiresAt }, { headers: { "cache-control": "no-store" } });
   } catch {
     return NextResponse.json(
       { error: "Couldn't update the share link" },
@@ -108,5 +118,37 @@ export async function DELETE(
       { error: "Couldn't delete the share link" },
       { status: 502 }
     );
+  }
+}
+
+// Expiry changes do not publish unsaved edits to the entry itself.
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  if (!shareEnabled()) return unavailable();
+  const { id } = await params;
+  const token = tokenFrom(request);
+  if (!token) return NextResponse.json({ error: "Not allowed" }, { status: 403 });
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+  }
+  const expiry = parseEntryShareExpiry(
+    body && typeof body === "object" && !Array.isArray(body)
+      ? (body as { expiresIn?: unknown }).expiresIn
+      : undefined
+  );
+  if (expiry === false || expiry === undefined) {
+    return NextResponse.json({ error: "Choose 7 days, 30 days, or Never" }, { status: 400 });
+  }
+  try {
+    const { result, expiresAt } = await changeEntryShareExpiry(id, token, expiry);
+    if (result !== "ok") return mutationError(result);
+    return NextResponse.json({ expiresAt }, { headers: { "cache-control": "no-store" } });
+  } catch {
+    return NextResponse.json({ error: "Couldn't change the link expiry" }, { status: 502 });
   }
 }
