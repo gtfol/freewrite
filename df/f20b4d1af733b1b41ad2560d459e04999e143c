@@ -1,0 +1,36 @@
+README.md
+  h_606d960bac5d85 7,16-17,51-55,57
+app/api/share/entry/[id]/route.ts
+  h_606d960bac5d85 2,6,29-31,57,72-76,89,91,123-154
+app/api/share/entry/route.ts
+  h_606d960bac5d85 2,21,36-40,53-54
+app/api/share/route.ts
+  h_606d960bac5d85 2,19-20
+components/history-sidebar.tsx
+  h_606d960bac5d85 46-47,111,136,143,146,148,150-163,166
+components/share-popover.tsx
+  h_606d960bac5d85 5,7,10-11,15-16,18,24,26-27,39,46-47,51-60,62,66-67,70-74,76,78-84,92,95,98,100,107-108,113-114,116,121-124,127-131,136,142-143,146-148,150,159,161-162,168-177,180-186,189-206,209,212,214-215,219-221,224,228-241,243-244,256,258-259
+lib/share-expiry.ts
+  h_606d960bac5d85 1-15
+lib/share.test.ts
+  h_606d960bac5d85 1-211
+lib/share.ts
+  h_606d960bac5d85 3-6,84,110-112,172,196-198,201-202,206-207,209,217-219,222,224-256,259-272,274-287,289-312,319
+lib/shares.test.ts
+  h_606d960bac5d85 1-134
+lib/shares.ts
+  h_606d960bac5d85 1-3,9,14-16,18-36,39-43,45,52-62,64,68-74,78-81,83-88,92,95,102-104,107-128
+lib/store.ts
+  h_606d960bac5d85 23,389-391
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "dff20b4d1af733b1b41ad2560d459e04999e143c",
+  "prompts": {},
+  "humans": {
+    "h_606d960bac5d85": {
+      "author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
