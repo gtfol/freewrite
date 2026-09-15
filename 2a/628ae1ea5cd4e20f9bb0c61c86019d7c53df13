@@ -1,0 +1,45 @@
+README.md
+  s_0521f8d73d6032::t_de903472190a36 102-124
+app/api/account/route.ts
+  s_0521f8d73d6032::t_6a7b6df9345735 1-22
+app/settings/page.tsx
+  s_0521f8d73d6032::t_e24ac4ad9ae1fd 1-129
+components/bottom-nav.tsx
+  s_0521f8d73d6032::t_54c6d6e4d39807 11-12,133-134
+components/reader-nav.tsx
+  s_0521f8d73d6032::t_35efbd928dfd10 13-14,276,305-306,308
+components/settings-link.tsx
+  s_0521f8d73d6032::t_b81c7c9756dfff 1-14
+components/support-link.tsx
+  s_0521f8d73d6032::t_172d7abddb4ee5 1-14
+lib/db.ts
+  s_0521f8d73d6032::t_12a605e28cb7f4 4,12-13,61,102-104,140,146,192,247,371,401-435
+lib/personal-data.test.ts
+  s_0521f8d73d6032::t_aad2ceba37eabd 1-30
+lib/personal-data.ts
+  s_0521f8d73d6032::t_ad2e60f02ef103 1-10
+lib/server/account-deletion-postgres.test.ts
+  s_0521f8d73d6032::t_f2d3829f68ad61 1-33
+lib/server/account-deletion.test.ts
+  s_0521f8d73d6032::t_f9b154efdbca95 1-22
+lib/server/account-deletion.ts
+  s_0521f8d73d6032::t_eafa1b628259c6 1-25
+lib/shares.ts
+  s_0521f8d73d6032::t_7ae18ed6325ef3 184-194
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2a628ae1ea5cd4e20f9bb0c61c86019d7c53df13",
+  "prompts": {},
+  "sessions": {
+    "s_0521f8d73d6032": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0836b-e052-7f82-9502-659c23c1b21f",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
