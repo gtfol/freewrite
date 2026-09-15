@@ -181,3 +181,14 @@ export async function deleteSharedEntry(entryId: string, deleteLocal: () => Prom
     await deleteLocal();
   });
 }
+
+/** Revoke under the publication lock; keep controls on any failure. */
+export async function revokeAllSharesAnd<T>(operation: () => Promise<T>): Promise<T> {
+  await Promise.all([...mutations.values()]);
+  return withShareLock(async () => {
+    for (const [entryId, share] of Object.entries(readAll(true))) {
+      await revokeEntryShareUnlocked(entryId, share.id);
+    }
+    return operation();
+  });
+}
