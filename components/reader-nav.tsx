@@ -10,7 +10,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { StorageSidebar } from "@/components/storage-sidebar";
+import { SupportLink } from "@/components/support-link";
+import { SettingsLink } from "@/components/settings-link";
 import { SyncPopover } from "@/components/sync-popover";
 import { useFullscreen } from "@/hooks/use-fullscreen";
 import { articleMarkdown } from "@/lib/articles";
@@ -174,7 +175,6 @@ export function ReaderNav({
   // Only offered on the library index. On an article the transport holds an
   // open generator that rewrites its manifest on dispose, which would put back
   // an audiobook the panel had just deleted.
-  const [storageOpen, setStorageOpen] = useState(false);
 
   if (trim?.active) {
     return (
@@ -273,14 +273,7 @@ export function ReaderNav({
             <Link href="/" className={itemClass}>
               Write
             </Link>
-            <Dot />
-            <button
-              type="button"
-              onClick={() => setStorageOpen(true)}
-              className={itemClass}
-            >
-              Settings
-            </button>
+
           </>
         )}
         {fullscreen.supported && (
@@ -309,13 +302,10 @@ export function ReaderNav({
           )}
         </button>
         <SyncPopover />
+          <SupportLink />
+          <SettingsLink />
       </div>
-      {!article && (
-        <StorageSidebar
-          open={storageOpen}
-          onClose={() => setStorageOpen(false)}
-        />
-      )}
+
     </nav>
   );
 }

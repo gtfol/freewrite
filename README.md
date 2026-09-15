@@ -99,3 +99,26 @@ if you sync, apply `db/migrations/0005_sketches.sql` — drawings are their own 
 ## stack
 
 next.js · tailwind · shadcn/ui · zustand · indexeddb · drawesome (drawing) · piper via onnx runtime web (on-device tts) · better auth + supabase (optional sync)
+
+### Settings and support
+
+Settings is available from the gear in both writing and reading navigation at `/settings`.
+It exports this browser's entries, drawings, articles, highlights and original PDFs as
+versioned JSON (PDF bytes are base64). Generated audio, credentials and share-management
+secrets are excluded. This is an export format, not an in-app restore/import flow.
+
+Guests can clear browser data; signed-in users can delete their account and synced data
+as well. Both require typing `DELETE` and revoke share links managed in this browser
+before clearing local data. Links managed only on other devices are independent browser
+capabilities and must be removed there. Other devices' offline copies are not remotely
+erased. Voice models can be removed separately in Audio storage. IndexedDB generation
+checks prevent older open tabs from writing stale content after a local reset.
+
+The navigation heart opens the separate, live [Support Freewrite checkout](https://buy.stripe.com/bJeaEY2jG3ZF1gKbezenS04):
+one-time support, with an editable $5 USD preset. The public URL is in
+`components/support-link.tsx`; no Stripe credentials, webhooks or subscription backend
+are needed. Forks should replace or remove this link.
+
+Account deletion integration tests can run against a disposable local database named
+`freewrite_settings_test`, using `FREEWRITE_TEST_DATABASE_URL`. The test truncates that
+local database's user records and never uses `DATABASE_URL`.

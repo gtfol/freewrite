@@ -1,7 +1,7 @@
 import type { Article, Entry, Sketch } from "@/lib/types";
 
 const DB_NAME = "freewrite";
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 const ENTRIES = "entries";
 const ARTICLES = "articles";
@@ -9,6 +9,8 @@ const SKETCHES = "sketches";
 const OUTBOX = "outbox";
 const SYNCMETA = "syncmeta";
 const PDFS = "pdfs";
+const LIFECYCLE = "lifecycle";
+let libraryGeneration = "initial";
 
 // Device-local stores: generated audio and its manifests. Nothing here ever
 // calls markDirty, so none of it reaches the outbox, the manifest, or the
@@ -56,6 +58,7 @@ function openDb(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = () => {
       const db = request.result;
+      if (!db.objectStoreNames.contains(LIFECYCLE)) db.createObjectStore(LIFECYCLE);
       if (!db.objectStoreNames.contains(ENTRIES)) {
         db.createObjectStore(ENTRIES, { keyPath: "id" }).createIndex(
           "createdAt",
@@ -96,7 +99,9 @@ function openDb(): Promise<IDBDatabase> {
     request.onsuccess = () => {
       const db = request.result;
       db.onversionchange = () => db.close();
-      resolve(db);
+      const read = db.transaction(LIFECYCLE).objectStore(LIFECYCLE).get("generation");
+      read.onsuccess = () => { libraryGeneration = read.result ?? "initial"; resolve(db); };
+      read.onerror = () => reject(read.error);
     };
     request.onerror = () => reject(request.error);
     request.onblocked = () => reject(new Error("IndexedDB open blocked"));
@@ -132,13 +137,13 @@ async function get<T>(store: string, id: string): Promise<T | undefined> {
 
 async function put<T>(store: string, value: T): Promise<void> {
   const db = await openDb();
-  const tx = db.transaction(store, "readwrite");
+  const tx = guardedWrite(db, store);
   await requestToPromise(tx.objectStore(store).put(value));
 }
 
 async function hardDelete(store: string, id: string): Promise<void> {
   const db = await openDb();
-  const tx = db.transaction(store, "readwrite");
+  const tx = guardedWrite(db, store);
   await requestToPromise(tx.objectStore(store).delete(id));
 }
 
@@ -184,7 +189,7 @@ export async function getEntry(id: string): Promise<Entry | undefined> {
 export async function putEntry(entry: Entry): Promise<void> {
   const db = await openDb();
   const now = Date.now();
-  const tx = db.transaction([ENTRIES, OUTBOX], "readwrite");
+  const tx = guardedWrite(db, [ENTRIES, OUTBOX]);
   let changed = false;
   const current = tx.objectStore(ENTRIES).get(entry.id);
   current.onsuccess = () => {
@@ -239,7 +244,7 @@ export const getPdfOriginal = (articleId: string) => get<LocalPdf>(PDFS, article
 export async function putPdfArticle(article: Article, original: File): Promise<void> {
   const db = await openDb();
   const now = Date.now();
-  const tx = db.transaction([ARTICLES, PDFS, OUTBOX], "readwrite");
+  const tx = guardedWrite(db, [ARTICLES, PDFS, OUTBOX]);
   try {
     tx.objectStore(ARTICLES).put({ ...article, updatedAt: now });
     tx.objectStore(PDFS).put({ articleId: article.id, name: original.name, file: original });
@@ -363,7 +368,7 @@ export async function localDeleteMany(
 ): Promise<void> {
   if (keys.length === 0) return;
   const db = await openDb();
-  const tx = db.transaction(store, "readwrite");
+  const tx = guardedWrite(db, store);
   const objectStore = tx.objectStore(store);
   for (const key of keys) objectStore.delete(key);
   await new Promise<void>((resolve, reject) => {
@@ -392,4 +397,39 @@ export async function purgeTombstones(): Promise<void> {
       await hardDelete(SKETCHES, s.id);
     }
   }
+}
+
+// Every write checks the generation in the same transaction. A tab loaded before
+// a reset cannot restore a draft, a sync response, or generated audio afterwards.
+function guardedWrite(db: IDBDatabase, stores: string | string[]): IDBTransaction {
+  const tx = db.transaction([...new Set([...(typeof stores === "string" ? [stores] : stores), LIFECYCLE])], "readwrite");
+  const read = tx.objectStore(LIFECYCLE).get("generation");
+  read.onsuccess = () => {
+    if ((read.result ?? "initial") !== libraryGeneration) tx.abort();
+  };
+  return tx;
+}
+
+export async function readPersonalData() {
+  const db = await openDb();
+  const tx = db.transaction([ENTRIES, ARTICLES, SKETCHES, PDFS], "readonly");
+  const [entries, articles, sketches, pdfs] = await Promise.all([
+    requestToPromise(tx.objectStore(ENTRIES).getAll() as IDBRequest<Entry[]>),
+    requestToPromise(tx.objectStore(ARTICLES).getAll() as IDBRequest<Article[]>),
+    requestToPromise(tx.objectStore(SKETCHES).getAll() as IDBRequest<Sketch[]>),
+    requestToPromise(tx.objectStore(PDFS).getAll() as IDBRequest<LocalPdf[]>),
+  ]);
+  return { entries: entries.filter(e => !e.deletedAt), articles: articles.filter(a => !a.deletedAt),
+    sketches: sketches.filter(s => !s.deletedAt), pdfs: pdfs.filter(p => articles.some(a => a.id === p.articleId && !a.deletedAt)) };
+}
+
+export async function resetPersonalData(): Promise<void> {
+  const db = await openDb();
+  const tx = db.transaction([...db.objectStoreNames], "readwrite");
+  for (const store of db.objectStoreNames) tx.objectStore(store).clear();
+  tx.objectStore(LIFECYCLE).put(crypto.randomUUID(), "generation");
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onabort = tx.onerror = () => reject(tx.error ?? new Error("Couldn't clear browser data"));
+  });
 }
