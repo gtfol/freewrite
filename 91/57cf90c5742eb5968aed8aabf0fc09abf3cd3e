@@ -1,0 +1,31 @@
+app/layout.tsx
+  s_0521f8d73d6032::t_219084f569b1d0 10,70
+app/settings/page.tsx
+  s_0521f8d73d6032::t_c7aaaedcdd821b 1,4
+components/settings-link.tsx
+  s_0521f8d73d6032::t_2813e8ad89a73a 2,8,10,13
+components/settings-panel.tsx
+  s_0521f8d73d6032::t_eaf7f5fb3f7e32 1-122
+components/settings-provider.tsx
+  s_0521f8d73d6032::t_fe42fc8f1c8080 1-32
+package-lock.json
+  s_0521f8d73d6032::t_0857d1ad702eb4 14
+package.json
+  s_0521f8d73d6032::t_48ef8cb7d4a4b3 16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9157cf90c5742eb5968aed8aabf0fc09abf3cd3e",
+  "prompts": {},
+  "sessions": {
+    "s_0521f8d73d6032": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0836b-e052-7f82-9502-659c23c1b21f",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
