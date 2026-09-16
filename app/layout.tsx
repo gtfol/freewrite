@@ -7,6 +7,7 @@ import {
   Lato,
 } from "next/font/google";
 
+import { SettingsProvider } from "@/components/settings-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ViewportLock } from "@/components/viewport-lock";
 import "./globals.css";
@@ -66,7 +67,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <ViewportLock />
-          {children}
+          <SettingsProvider>{children}</SettingsProvider>
         </ThemeProvider>
       </body>
     </html>
