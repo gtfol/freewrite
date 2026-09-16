@@ -3,7 +3,8 @@
 import { useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { StorageSidebar } from '@/components/storage-sidebar';
+import { AudioStorage } from '@/components/audio-storage';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel } from '@/components/ui/alert-dialog';
 import { readPersonalData, resetPersonalData } from '@/lib/db';
 import { personalDataExport } from '@/lib/personal-data';
@@ -17,7 +18,6 @@ const action = 'text-muted-foreground transition-colors hover:text-foreground di
 export function SettingsPanel({open, onClose}: {open: boolean; onClose: () => void}) {
   const user = useSync(s => s.user);
   const status = useSync(s => s.status);
-  const [storage, setStorage] = useState(false);
   const [confirm, setConfirm] = useState<{userId: string | null} | null>(null);
   const [confirmation, setConfirmation] = useState('');
   const [busy, setBusy] = useState(false);
@@ -75,17 +75,16 @@ export function SettingsPanel({open, onClose}: {open: boolean; onClose: () => vo
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not clear your data. Try again.'); setBusy(false); }
   }
 
-  return <Dialog.Root open={open} onOpenChange={value => {if (!value && !busy) {setStorage(false); onClose();}}}>
+  return <Dialog.Root open={open} onOpenChange={value => {if (!value && !busy) onClose();}}>
     <Dialog.Portal>
       <Dialog.Overlay className="fixed inset-0 z-50 bg-black/15 dark:bg-black/50 data-[state=open]:animate-in data-[state=open]:fade-in-0 motion-reduce:animate-none" />
-      <Dialog.Content aria-describedby={undefined} className="fixed inset-y-0 right-0 z-50 w-full max-w-[480px] overflow-y-auto border-l bg-background px-7 pt-6 pb-8 text-[13px] outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-right data-[state=open]:duration-200 motion-reduce:animate-none" onCloseAutoFocus={event => {event.preventDefault(); document.querySelector<HTMLButtonElement>('[data-settings-trigger]')?.focus();}} onEscapeKeyDown={event => {if (storage) {event.preventDefault(); setStorage(false);}}}>
+      <Dialog.Content aria-describedby={undefined} className="fixed inset-y-0 right-0 z-50 w-full max-w-[480px] overflow-y-auto border-l bg-background px-7 pt-6 pb-8 text-[13px] outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-right data-[state=open]:duration-200 motion-reduce:animate-none" onCloseAutoFocus={event => {event.preventDefault(); document.querySelector<HTMLButtonElement>('[data-settings-trigger]')?.focus();}}>
       <Dialog.Title className="mb-10 pr-10 text-sm font-normal">Settings</Dialog.Title>
       <Dialog.Close disabled={busy} aria-label="Close settings" className="absolute right-5 top-4 p-2 text-muted-foreground hover:text-foreground disabled:opacity-40"><X size={14} strokeWidth={1.5} /></Dialog.Close>
       <section className="space-y-5">
-        <h2 className="font-normal">Your data</h2>
+        <div className="flex items-center gap-1"><h2 className="font-normal">Your data</h2><InfoTooltip label="About your data export">Entries, drawings, saved articles, highlights, and original PDFs from this browser. Downloads as JSON; generated audio is excluded.</InfoTooltip></div>
         <div>
           <button disabled={busy} onClick={() => void exportData()} className={action}>Export data</button>
-          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Entries, drawings, saved articles, highlights, and original PDFs from this browser. Downloads as JSON; generated audio is excluded.</p>
         </div>
         <button disabled={busy || status === 'loading'} className={action} onClick={() => {setConfirm({userId: user?.id ?? null}); setConfirmation(''); setMessage('');}}>
           {user ? 'Delete account' : 'Clear browser data'}
@@ -93,11 +92,10 @@ export function SettingsPanel({open, onClose}: {open: boolean; onClose: () => vo
       </section>
       <section className="mt-10 space-y-5">
         <h2 className="font-normal">Audio</h2>
-        <button disabled={busy} className={action} onClick={() => setStorage(true)}>Manage downloads and storage</button>
+        <AudioStorage disabled={busy} />
       </section>
-      <p role="status" className="mt-5 text-xs text-muted-foreground">{!confirm && message}</p>
+      {!confirm && message && <p role="status" className="mt-5 text-xs text-muted-foreground">{message}</p>}
       <a className={`mt-10 inline-block ${action}`} href="https://github.com/gtfol/freewrite" target="_blank" rel="noopener noreferrer">Source code</a>
-    {storage && <StorageSidebar open onClose={() => setStorage(false)} />}
     <AlertDialog open={!!confirm} onOpenChange={open => {if (!open && !busy) setConfirm(null);}}>
       <AlertDialogContent>
         <AlertDialogHeader>
