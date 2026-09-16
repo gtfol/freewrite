@@ -8,7 +8,6 @@ import { useTheme } from "next-themes";
 import { ChatPopover } from "@/components/chat-popover";
 import { FontPopover } from "@/components/font-popover";
 import { SharePopover } from "@/components/share-popover";
-import { SupportLink } from "@/components/support-link";
 import { SettingsLink } from "@/components/settings-link";
 import { SyncPopover } from "@/components/sync-popover";
 import { TimerButton } from "@/components/timer-button";
@@ -130,7 +129,6 @@ export function BottomNav() {
             )}
           </NavButton>
           <SyncPopover />
-          <SupportLink />
           <SettingsLink />
           <NavButton
             active={sidebarOpen}
