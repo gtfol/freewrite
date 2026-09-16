@@ -1,0 +1,21 @@
+components/settings-panel.tsx
+  s_0521f8d73d6032::t_f0dc0cf03f2a99 4-5,99-102
+components/support-link.tsx
+  s_0521f8d73d6032::t_f1adf700932627 3,6-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "94031b37de861dc11225e477ba678eacca98817b",
+  "prompts": {},
+  "sessions": {
+    "s_0521f8d73d6032": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0836b-e052-7f82-9502-659c23c1b21f",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
