@@ -10,7 +10,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { SupportLink } from "@/components/support-link";
 import { SettingsLink } from "@/components/settings-link";
 import { SyncPopover } from "@/components/sync-popover";
 import { useFullscreen } from "@/hooks/use-fullscreen";
@@ -302,7 +301,6 @@ export function ReaderNav({
           )}
         </button>
         <SyncPopover />
-          <SupportLink />
           <SettingsLink />
       </div>
 

@@ -1,7 +1,8 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { ArrowUpRight, X } from 'lucide-react';
+import { SupportLink } from '@/components/support-link';
 import * as Dialog from '@radix-ui/react-dialog';
 import { AudioStorage } from '@/components/audio-storage';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
@@ -95,7 +96,10 @@ export function SettingsPanel({open, onClose}: {open: boolean; onClose: () => vo
         <AudioStorage disabled={busy} />
       </section>
       {!confirm && message && <p role="status" className="mt-5 text-xs text-muted-foreground">{message}</p>}
-      <a className={`mt-10 inline-block ${action}`} href="https://github.com/gtfol/freewrite" target="_blank" rel="noopener noreferrer">Source code</a>
+      <div className="mt-10 flex flex-col items-start gap-3">
+        <a className={`inline-flex items-center gap-1 ${action}`} href="https://github.com/gtfol/freewrite" target="_blank" rel="noopener noreferrer">Source code <ArrowUpRight size={13} strokeWidth={1.5} aria-hidden="true" /></a>
+        <SupportLink className={`inline-flex items-center gap-1 ${action}`} />
+      </div>
     <AlertDialog open={!!confirm} onOpenChange={open => {if (!open && !busy) setConfirm(null);}}>
       <AlertDialogContent>
         <AlertDialogHeader>
