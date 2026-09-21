@@ -1,0 +1,19 @@
+components/history-sidebar.tsx
+  s_0521f8d73d6032::t_3955657c46079b 73,89,99,104,112,121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c08124818ff779d5664bf9d0c8f899aa9b27d2ee",
+  "prompts": {},
+  "sessions": {
+    "s_0521f8d73d6032": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0836b-e052-7f82-9502-659c23c1b21f",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
