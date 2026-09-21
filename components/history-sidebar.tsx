@@ -13,7 +13,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { entryDate, entryFilename, entryPreview } from "@/lib/entries";
 import { embedSketches } from "@/lib/sketch-svg";
 import { useWriter } from "@/lib/store";
@@ -71,7 +70,7 @@ export function HistorySidebar() {
           </button>
         </div>
 
-        <ScrollArea className="flex-1">
+        <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
           <ul className="flex flex-col gap-px px-2 pb-4">
             {entries.map((entry) => {
               const preview = entryPreview(entry);
@@ -87,7 +86,7 @@ export function HistorySidebar() {
                   >
                     <span
                       className={cn(
-                        "block truncate pr-12 text-sm",
+                        "block truncate pr-16 text-sm",
                         preview ? "text-foreground" : "text-muted-foreground/60"
                       )}
                     >
@@ -97,12 +96,12 @@ export function HistorySidebar() {
                       {entryDate(entry)}
                     </span>
                   </button>
-                  <span className="absolute top-1/2 right-2 hidden -translate-y-1/2 items-center gap-1.5 group-hover:flex">
+                  <span className="absolute top-1/2 right-3 flex -translate-y-1/2 items-center gap-1 opacity-100 transition-opacity [@media(hover:hover)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
                     <button
                       type="button"
                       onClick={() => download(entry, sketches)}
                       title="Download as markdown"
-                      className="text-muted-foreground transition-colors hover:text-foreground"
+                      className="flex size-7 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
                     >
                       <Download className="size-3.5" />
                     </button>
@@ -110,7 +109,7 @@ export function HistorySidebar() {
                       type="button"
                       onClick={() => { setDeleteError(null); setDeleting(entry); }}
                       title="Delete entry"
-                      className="text-muted-foreground transition-colors hover:text-destructive"
+                      className="flex size-7 items-center justify-center text-muted-foreground transition-colors hover:text-destructive"
                     >
                       <Trash2 className="size-3.5" />
                     </button>
@@ -119,7 +118,7 @@ export function HistorySidebar() {
               );
             })}
           </ul>
-        </ScrollArea>
+        </div>
       </aside>
 
       {open && (
