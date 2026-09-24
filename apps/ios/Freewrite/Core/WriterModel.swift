@@ -16,6 +16,7 @@ import Observation
     private let store: any EntryStore
     private let transcriber: any Transcriber
     private let cleaner: any TextCleaner
+    private let track: @MainActor (UsageEvent) -> Void
     private let defaults: UserDefaults
     private var insertion: DictationInsertion?
     private var runID: UUID?
@@ -26,7 +27,8 @@ import Observation
     struct CleanupUndo { let id = UUID(); var range: NSRange; let raw: String; let cleaned: String }
 
     init(store: any EntryStore, transcriber: any Transcriber, cleaner: any TextCleaner = OnDeviceTextCleaner(),
-         defaults: UserDefaults = .standard) {
+         defaults: UserDefaults = .standard, track: @escaping @MainActor (UsageEvent) -> Void = { _ in }) {
+        self.track = track
         self.store = store; self.transcriber = transcriber; self.cleaner = cleaner; self.defaults = defaults
         backspaceLocked = defaults.bool(forKey: "backspaceLocked")
         load()
@@ -83,6 +85,7 @@ import Observation
         abandonDictation()
         let entry = Entry()
         do { try store.save(entry) } catch { saveFailed = true; return }
+        track(.entryCreated)
         entries.insert(entry, at: 0); current = entry; selection = NSRange(location: 0, length: 0)
         defaults.set(entry.id, forKey: "lastEntryID"); cleanupUndo = nil; notice = nil
     }
@@ -125,6 +128,7 @@ import Observation
 
     func startDictation() {
         guard !active, current != nil else { return }
+        track(.dictationRequested)
         let token = UUID(); runID = token; notice = nil; cleanupUndo = nil
         insertion = DictationInsertion(text: text, caret: NSMaxRange(selection))
         phase = .preparing
@@ -140,6 +144,7 @@ import Observation
                 await self.finishCleanup(token: token)
             } catch {
                 guard self.runID == token else { return }
+                self.track(.dictationFailed)
                 self.notice = error as? WritingError ?? .audio
                 self.phase = .idle; self.insertion = nil; self.runID = nil
                 _ = self.flush()
@@ -157,7 +162,10 @@ import Observation
         switch event {
         case .preparing: if phase != .stopping { phase = .preparing }
         case .downloading(let progress): if phase != .stopping { phase = .downloading; downloadProgress = progress }
-        case .listening: if phase != .stopping { phase = .listening }
+        case .listening: if phase != .stopping {
+            if phase != .listening { track(.dictationStarted) }
+            phase = .listening
+        }
         case .segment(let words, let isFinal):
             guard var span = insertion else { return }
             let prior = span.range
@@ -173,6 +181,7 @@ import Observation
     }
 
     private func finishCleanup(token: UUID) async {
+        track(.dictationFinished)
         _ = flush() // Raw text is durable before cleanup starts.
         guard let captured = insertion, !captured.transcript.isEmpty else {
             phase = .idle; insertion = nil; runID = nil; return

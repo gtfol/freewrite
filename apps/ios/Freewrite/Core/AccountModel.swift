@@ -12,7 +12,9 @@ import Observation
     private let credentials: any AccountCredentialStoring
     private let client: FreewriteAccountClient
     private let browser: any BrowserAuthenticating
-    init(credentials: any AccountCredentialStoring, client: FreewriteAccountClient, browser: any BrowserAuthenticating) {
+    private let track: @MainActor (UsageEvent) -> Void
+    init(credentials: any AccountCredentialStoring, client: FreewriteAccountClient, browser: any BrowserAuthenticating, track: @escaping @MainActor (UsageEvent) -> Void = { _ in }) {
+        self.track = track
         self.credentials = credentials; self.client = client; self.browser = browser
         do { login = try credentials.read() } catch { self.error = SignInError.storage.localizedDescription }
     }
@@ -26,6 +28,7 @@ import Observation
             do { try credentials.save(received) }
             catch { try? await client.revoke(token: received.token); throw SignInError.storage }
             login = received
+            track(.signInCompleted)
         } catch SignInError.cancelled { /* Closing the browser leaves the existing writing alone. */ }
         catch { self.error = (error as? SignInError ?? .unavailable).localizedDescription }
     }
@@ -45,7 +48,7 @@ import Observation
     func signOut() async {
         guard !busy, let existing = login else { return }
         busy = true; error = nil; defer { busy = false }
-        do { try await client.revoke(token: existing.token); try credentials.save(nil); login = nil }
+        do { try await client.revoke(token: existing.token); try credentials.save(nil); login = nil; track(.signOutCompleted) }
         catch { self.error = (error as? SignInError ?? .storage).localizedDescription }
     }
     func deleteAccount(expectedUserID: String) async {

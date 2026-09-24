@@ -11,7 +11,7 @@ struct WriteView: View {
             ZStack {
                 Text("freewrite").font(FreewriteStyle.heading)
                 HStack {
-                    Button { settings = true } label: {
+                    Button { Analytics.track(.settingsOpened); settings = true } label: {
                         Image(systemName: "gearshape").font(.system(size: 17, weight: .regular))
                             .frame(width: 44, height: 44)
                     }.accessibilityLabel("settings")
@@ -35,7 +35,7 @@ struct WriteView: View {
                 status
                 Rectangle().fill(FreewriteStyle.divider).frame(height: 0.5)
                 HStack(spacing: 8) {
-                    Button { model.timer.toggle() } label: {
+                    Button { if !model.timer.running { Analytics.track(.timerStarted) }; model.timer.toggle() } label: {
                         Text(model.timer.label).monospacedDigit().frame(minWidth: 54, minHeight: 48)
                     }.accessibilityLabel(model.timer.running ? "pause timer" : "start timer")
                         .accessibilityValue(model.timer.label)
@@ -54,7 +54,7 @@ struct WriteView: View {
                         Image(systemName: "plus").font(.system(size: 20, weight: .regular)).frame(width: 48, height: 48)
                     }.accessibilityLabel("new entry")
                     Spacer(minLength: 0)
-                    Button { history = true } label: {
+                    Button { Analytics.track(.historyOpened); history = true } label: {
                         Image(systemName: "clock").font(.system(size: 20, weight: .regular)).frame(width: 48, height: 48)
                     }.accessibilityLabel("history")
                 }.font(FreewriteStyle.caption).padding(.horizontal, 20)

@@ -132,3 +132,9 @@ are needed. Forks should replace or remove this link.
 Account deletion integration tests can run against a disposable local database named
 `freewrite_settings_test`, using `FREEWRITE_TEST_DATABASE_URL`. The test truncates that
 local database's user records and never uses `DATABASE_URL`.
+
+### Usage analytics
+
+Production uses the official `posthog-js` SDK and the shared Freewrite PostHog project (626171, US). Set `NEXT_PUBLIC_POSTHOG_KEY` to its public write-only project token and `NEXT_PUBLIC_POSTHOG_HOST` to `https://us.i.posthog.com` in Vercel Production. Neither is a personal API key. Missing configuration, previews, and localhost disable analytics.
+
+Only explicit events are accepted. Before-send allowlisting removes content, account identifiers, nested profile properties, raw URLs, referrers, and arbitrary metadata; known page routes replace article/share IDs with `[id]`. The authentication bridge does not initialize analytics. Autocapture, replay, surveys, automatic exceptions, and feature flags are disabled. Analytics does not identify accounts or create person profiles. Settings provides an opt-out that survives clearing writing data, and browser Do Not Track/Global Privacy Control are respected. See `/privacy` for the disclosure.

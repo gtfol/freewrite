@@ -1,5 +1,7 @@
 "use client";
 
+import { trackUsage } from "@/lib/analytics";
+
 import { useEffect, useRef } from "react";
 
 import { cn } from "@/lib/utils";
@@ -45,6 +47,7 @@ export function TimerButton() {
     if (clickTimeout.current) return;
     clickTimeout.current = setTimeout(() => {
       clickTimeout.current = null;
+      if (!useTimer.getState().running) trackUsage("timer_started");
       toggle();
     }, 250);
   };

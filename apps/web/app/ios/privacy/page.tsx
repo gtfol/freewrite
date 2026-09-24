@@ -13,7 +13,7 @@ export default function IOSPrivacyPage() {
         <p>This page describes the native freewrite iPhone app. You can optionally sign in with your web account; entry sync is not yet included in this iPhone test build.</p>
         <section>
           <h2 className="text-base">Your writing stays on your iPhone</h2>
-          <p>Entries and drafts are saved in the app’s local database. This version does not sync entries and has no advertising or analytics. Your entries may be included in device backups according to your Apple settings.</p>
+          <p>Entries and drafts are saved in the app’s local database. This version does not sync entries and has no advertising. Your entries may be included in device backups according to your Apple settings.</p>
           <p>Deleting an entry clears its text from the app’s database and retains an empty deletion record. Removing the app removes its local data; any device backups are managed separately through your Apple settings.</p>
         </section>
         <section>
@@ -29,6 +29,11 @@ export default function IOSPrivacyPage() {
         <section>
           <h2 className="text-base">On-device cleanup</h2>
           <p>After dictation stops, cleanup removes clear English fillers and tidies punctuation on your iPhone. No text is sent to an AI service, and no API key or account is required. Other languages retain the speech framework’s transcript. You can undo cleanup to restore the original words.</p>
+        </section>
+        <section>
+          <h2 className="text-base">Usage analytics</h2>
+          <p>We use PostHog’s US service to understand basic actions such as opening the app, creating an entry, and starting or finishing dictation. Events include a random installation identifier, a session identifier, and the app version. We do not link these events to your account or send your writing, transcript, audio, name, email address, or article content. Screen recording and automatic interaction capture are disabled.</p>
+          <p>You can turn off “usage analytics” in Settings. PostHog receives network information when your device connects; we disable IP-based location enrichment and do not use analytics for advertising or tracking across other companies’ apps.</p>
         </section>
         <section>
           <h2 className="text-base">Voluntary support</h2>

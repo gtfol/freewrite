@@ -1,5 +1,7 @@
 "use client";
 
+import { trackUsage } from "@/lib/analytics";
+
 import Link from "next/link";
 import { useState } from "react";
 import { Clock, Moon, Sun } from "lucide-react";
@@ -115,7 +117,7 @@ export function BottomNav() {
               <Dot />
             </>
           )}
-          <NavButton onClick={addEntry}>New Entry</NavButton>
+          <NavButton onClick={() => { addEntry(); trackUsage("entry_created"); }}>New Entry</NavButton>
           <Dot />
           <NavButton
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
@@ -132,7 +134,7 @@ export function BottomNav() {
           <SettingsLink />
           <NavButton
             active={sidebarOpen}
-            onClick={() => setSidebarOpen(!sidebarOpen)}
+            onClick={() => { if (!sidebarOpen) trackUsage("history_opened"); setSidebarOpen(!sidebarOpen); }}
             title="History"
             className="flex items-center"
           >

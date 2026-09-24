@@ -2,7 +2,7 @@
 
 write for 15 minutes. don't stop. don't edit. now you can talk, too.
 
-Native SwiftUI + SwiftData, iOS 26+, iPhone only. No third-party dependencies, analytics, bundled credentials, or background recording. The bundle ID is `dev.gtfol.freewrite`, registered to gtfol, LLC (team `J59ZSG67SJ`).
+Native SwiftUI + SwiftData, iOS 26+, iPhone only. Uses the official PostHog SDK for optional usage analytics; no background recording. Only the public write-only project token is bundled, never a personal API key. The bundle ID is `dev.gtfol.freewrite`, registered to gtfol, LLC (team `J59ZSG67SJ`).
 
 ## Build and run
 
@@ -80,3 +80,9 @@ References: [Apple speech results](https://developer.apple.com/documentation/spe
 The app uses ASWebAuthenticationSession with an S256 PKCE challenge and random state. The fixed callback `dev.gtfol.freewrite://auth/callback` carries a single-use, two-minute code, never a session token. The server checks the browser session and explicit account choice before issuing a code; exchange verifies the PKCE proof and original browser session in a database transaction. Only hashes of codes and native bearer tokens are stored. The existing Better Auth verification/session tables and user deletion cascade are reused; this feature needs no schema migration. Native tokens expire after 90 days and are accepted only by `/api/ios/*`, not as website cookies.
 
 The native network client uses an ephemeral session with no cookie or credential storage and rejects redirects. Keychain credentials use `WhenUnlockedThisDeviceOnly`. Cancelling sign-in leaves the writing unchanged. Failed credential storage revokes the newly issued session; failed offline sign-out retains the credential so revocation can be retried.
+
+## Usage analytics
+
+Both platforms use the `freewrite` PostHog project (626171, US). Native analytics runs only in Release builds on physical devices, never Debug, simulator, or unit tests. A closed event enum and a before-send property allowlist exclude user content, account IDs, names, email, screen names, and freeform errors. No identify calls, session replay, swizzling, automatic interaction capture, surveys, error capture, or feature-flag requests. Settings includes a persistent opt-out. Only random installation/session IDs and numeric app/SDK versions accompany explicit usage events.
+
+PostHog is pinned to 3.81.0 through the project generator. Regenerate the Xcode project after changing dependencies; commit its Package.resolved.
