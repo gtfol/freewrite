@@ -1,0 +1,28 @@
+apps/ios/FreewriteTests/AudioBufferBridgeTests.swift
+  s_ed36ef5ee1b507::t_bc25f0d16d13ec 1-39
+apps/ios/docs/verification.md
+  s_ed36ef5ee1b507::t_2acb0936d77642 8,14-20
+apps/ios/Freewrite/Core/AppleTranscriber.swift
+  s_ed36ef5ee1b507::t_bc25f0d16d13ec 106,186,192-198
+  s_ed36ef5ee1b507::t_fa67d342ccf83f 199
+apps/ios/Freewrite.xcodeproj/project.pbxproj
+  s_ed36ef5ee1b507::t_b9c4f3d813c4a2 104-109,196,275-278,302,415,436
+apps/ios/scripts/generate-project.py
+  s_ed36ef5ee1b507::t_41f24f8f2e0f99 47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "75e12535bc7fd134d057b840c9f8952056e39998",
+  "prompts": {},
+  "sessions": {
+    "s_ed36ef5ee1b507": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d08a-bb45-7cc2-b052-ae3dfead9767",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
