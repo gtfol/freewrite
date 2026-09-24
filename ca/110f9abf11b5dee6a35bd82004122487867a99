@@ -1,0 +1,32 @@
+apps/web/package.json
+  s_ed36ef5ee1b507::t_0bbf79b47a3c5b 1-57
+apps/web/README.md
+  s_ed36ef5ee1b507::t_0bbf79b47a3c5b 1-126
+README.md
+  s_ed36ef5ee1b507::t_0bbf79b47a3c5b 3,5-7,9,11,13,15,17,19,21
+docs/repository-migration.md
+  s_ed36ef5ee1b507::t_0bbf79b47a3c5b 1-36
+  s_ed36ef5ee1b507::t_d1fc70c8fe075e 37-42
+.gitignore
+  s_ed36ef5ee1b507::t_0bbf79b47a3c5b 1-4,7-10
+.github/workflows/web.yml
+  s_ed36ef5ee1b507::t_0bbf79b47a3c5b 1-34
+apps/web/.gitignore
+  s_ed36ef5ee1b507::t_44aea6b7fc1b3f 1-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ca110f9abf11b5dee6a35bd82004122487867a99",
+  "prompts": {},
+  "sessions": {
+    "s_ed36ef5ee1b507": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d08a-bb45-7cc2-b052-ae3dfead9767",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
