@@ -1,0 +1,71 @@
+apps/ios/Freewrite.xcodeproj/project.pbxproj
+  s_ed36ef5ee1b507::t_2ae906ad291188 8-13,74-79,176-181,238,244,253-256,297-300,348,371-374,382,407-423,427,512,533,588,642
+apps/ios/Freewrite.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+  s_ed36ef5ee1b507::t_1fd06c1950ef65 1-15
+apps/ios/Freewrite/Analytics.swift
+  s_ed36ef5ee1b507::t_ba824ed82158d8 1-48
+apps/ios/Freewrite/Core/AccountModel.swift
+  s_ed36ef5ee1b507::t_229bf59d34a29c 15-17,31,51
+apps/ios/Freewrite/Core/UsageAnalytics.swift
+  s_ed36ef5ee1b507::t_6952af41b3310a 1-31
+apps/ios/Freewrite/Core/WriterModel.swift
+  s_ed36ef5ee1b507::t_30f41ff1f660d4 19,30-31,88,131,147,165-168,184
+apps/ios/Freewrite/FreewriteApp.swift
+  s_ed36ef5ee1b507::t_7cce61cd20f691 9-10,31
+apps/ios/Freewrite/Resources/PrivacyInfo.xcprivacy
+  s_ed36ef5ee1b507::t_62abb87d2db459 58-81
+apps/ios/Freewrite/UI/SettingsView.swift
+  s_ed36ef5ee1b507::t_d7414884072b25 9,39-49
+apps/ios/Freewrite/UI/WriteView.swift
+  s_ed36ef5ee1b507::t_f99839e5acd83c 14,38,57
+apps/ios/FreewriteTests/UsageAnalyticsTests.swift
+  s_ed36ef5ee1b507::t_0c33115bd69576 1-32
+apps/ios/README.md
+  s_ed36ef5ee1b507::t_de268e9e04e558 5,83-88
+apps/ios/scripts/generate-project.py
+  s_ed36ef5ee1b507::t_deaacfc05988db 44-47,50,65,69
+apps/web/README.md
+  s_ed36ef5ee1b507::t_eb9597988554dc 135-140
+apps/web/app/ios/privacy/page.tsx
+  s_ed36ef5ee1b507::t_a337a84613cf4c 16,33-37
+apps/web/app/privacy/page.tsx
+  s_ed36ef5ee1b507::t_193bd959038c6a 1-16
+apps/web/components/bottom-nav.tsx
+  s_ed36ef5ee1b507::t_4eba70d6bb644c 3-4,120,137
+apps/web/components/reader-nav.tsx
+  s_ed36ef5ee1b507::t_6460f41cc8ce70 3-4,237,260
+apps/web/components/settings-panel.tsx
+  s_ed36ef5ee1b507::t_fa40c1688e5480 3-4,18-19,23,102-106
+apps/web/components/settings-provider.tsx
+  s_ed36ef5ee1b507::t_91697bc9b21210 3-4,28
+apps/web/components/timer-button.tsx
+  s_ed36ef5ee1b507::t_10d64b07eece3f 3-4,50
+apps/web/instrumentation-client.ts
+  s_ed36ef5ee1b507::t_a294ba938fa03a 1-37
+apps/web/lib/analytics-policy.test.ts
+  s_ed36ef5ee1b507::t_7c0bf9ef32d9eb 1-42
+apps/web/lib/analytics-policy.ts
+  s_ed36ef5ee1b507::t_087da4b2f1174c 1-45
+apps/web/lib/analytics.ts
+  s_ed36ef5ee1b507::t_ff6af6e00e413b 1-25
+apps/web/package-lock.json
+  s_ed36ef5ee1b507::t_7f83bab4373092 33,1816-1840,2866-2872,4172-4185,4468-4476,5261-5266,7560-7607,7663-7668,8898-8910
+apps/web/package.json
+  s_ed36ef5ee1b507::t_8f660bb32bc77e 36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "091e90a57de3cbcab12392fbd3b4f98e95922228",
+  "prompts": {},
+  "sessions": {
+    "s_ed36ef5ee1b507": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d08a-bb45-7cc2-b052-ae3dfead9767",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
