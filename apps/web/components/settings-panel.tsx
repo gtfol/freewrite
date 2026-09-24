@@ -1,6 +1,7 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useSyncExternalStore, useRef, useState } from 'react';
+import { analyticsEnabled, setAnalyticsEnabled } from '@/lib/analytics';
 import { ArrowUpRight, X } from 'lucide-react';
 import { SupportLink } from '@/components/support-link';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -14,9 +15,12 @@ import { useWriter } from '@/lib/store';
 import { useSync } from '@/lib/sync';
 import { authClient } from '@/lib/auth-client';
 
+const subscribeAnalytics = (changed: () => void) => { window.addEventListener('storage', changed); window.addEventListener('freewrite-analytics-change', changed); return () => { window.removeEventListener('storage', changed); window.removeEventListener('freewrite-analytics-change', changed); }; };
+
 const action = 'text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40';
 
 export function SettingsPanel({open, onClose}: {open: boolean; onClose: () => void}) {
+  const enabled = useSyncExternalStore(subscribeAnalytics, analyticsEnabled, () => false);
   const user = useSync(s => s.user);
   const status = useSync(s => s.status);
   const [confirm, setConfirm] = useState<{userId: string | null} | null>(null);
@@ -94,6 +98,11 @@ export function SettingsPanel({open, onClose}: {open: boolean; onClose: () => vo
       <section className="mt-10 space-y-5">
         <h2 className="font-normal">Audio</h2>
         <AudioStorage disabled={busy} />
+      </section>
+      <section className="mt-10 space-y-5">
+        <div className="flex items-center gap-1"><h2 className="font-normal">Usage analytics</h2><InfoTooltip label="About usage analytics">Basic usage events help improve freewrite. PostHog receives a random browser identifier, never your writing, article content, name, or email. No screen recording. Your browser’s privacy signals are respected.</InfoTooltip></div>
+        <label className="flex items-center gap-3"><input type="checkbox" checked={enabled} onChange={event => { setAnalyticsEnabled(event.target.checked); window.dispatchEvent(new Event('freewrite-analytics-change')); }} />Share usage analytics</label>
+        <a className={action} href="/privacy">Privacy policy</a>
       </section>
       {!confirm && message && <p role="status" className="mt-5 text-xs text-muted-foreground">{message}</p>}
       <div className="mt-10 flex flex-col items-start gap-3">

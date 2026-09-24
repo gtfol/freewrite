@@ -6,6 +6,7 @@ struct SettingsView: View {
     @State private var deletingUserID: String?
     @State private var deleteConfirmation = ""
     @State private var showDelete = false
+    @AppStorage(Analytics.preferenceKey) private var analyticsEnabled = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,6 +34,17 @@ struct SettingsView: View {
                         ])
                         Spacer(minLength: 8)
                         Text("on-device").font(FreewriteStyle.caption).foregroundStyle(FreewriteStyle.secondary)
+                    }
+                    Rectangle().fill(FreewriteStyle.divider).frame(height: 0.5)
+                    HStack(spacing: 0) {
+                        Text("usage analytics")
+                        InfoButton(title: "usage analytics", paragraphs: [
+                            "basic usage events help us improve freewrite. PostHog receives a random installation identifier and app version, never your writing, dictation, name, or email.",
+                            "no screen recordings or advertising tracking. turn this off to stop sending analytics from this iPhone."
+                        ])
+                        Spacer(minLength: 8)
+                        Toggle("usage analytics", isOn: $analyticsEnabled).labelsHidden()
+                            .onChange(of: analyticsEnabled) { _, enabled in Analytics.setEnabled(enabled) }
                     }
                     Rectangle().fill(FreewriteStyle.divider).frame(height: 0.5)
                     VStack(alignment: .leading, spacing: 0) {

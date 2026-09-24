@@ -1,9 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  async redirects() {
-    return [{ source: "/ios/support", destination: "https://gtfol.dev/contact", permanent: true }];
-  },
   serverExternalPackages: ["pg"],
   outputFileTracingIncludes: {
     "/api/pdf-assets/*": [

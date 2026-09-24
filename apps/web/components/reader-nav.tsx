@@ -1,5 +1,7 @@
 "use client";
 
+import { trackUsage } from "@/lib/analytics";
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
@@ -232,7 +234,7 @@ export function ReaderNav({
               <>
                 <button
                   type="button"
-                  onClick={listen.onToggle}
+                  onClick={() => { trackUsage("reader_listen_toggled"); listen.onToggle(); }}
                   className={listen.active ? "text-foreground" : itemClass}
                 >
                   Listen
@@ -255,7 +257,7 @@ export function ReaderNav({
             {edit && (
               <>
                 <Dot />
-                <button type="button" onClick={edit.onStart} className={itemClass}>
+                <button type="button" onClick={() => { trackUsage("reader_edit_started"); edit.onStart(); }} className={itemClass}>
                   Edit
                 </button>
               </>

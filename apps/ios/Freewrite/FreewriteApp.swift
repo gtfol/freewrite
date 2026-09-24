@@ -6,7 +6,8 @@ import SwiftData
     @State private var loadError = false
     @State private var account = AccountModel(credentials: AccountCredentialStore(),
                                              client: FreewriteAccountClient(transport: AccountURLSessionTransport()),
-                                             browser: BrowserSignIn())
+                                             browser: BrowserSignIn(), track: Analytics.track)
+    init() { Analytics.setup() }
     var body: some Scene {
         WindowGroup {
             Group {
@@ -27,7 +28,7 @@ import SwiftData
                                                        appropriateFor: nil, create: true)
             let configuration = ModelConfiguration(url: support.appendingPathComponent("default.store"), cloudKitDatabase: .none)
             let container = try ModelContainer(for: StoredEntry.self, configurations: configuration)
-            model = WriterModel(store: SwiftDataEntryStore(container: container), transcriber: AppleTranscriber())
+            model = WriterModel(store: SwiftDataEntryStore(container: container), transcriber: AppleTranscriber(), track: Analytics.track)
             loadError = false
         } catch { loadError = true }
     }

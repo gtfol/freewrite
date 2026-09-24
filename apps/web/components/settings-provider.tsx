@@ -1,5 +1,7 @@
 "use client";
 
+import { trackUsage } from "@/lib/analytics";
+
 import { Suspense, createContext, useCallback, useContext, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { SettingsPanel } from "./settings-panel";
@@ -23,7 +25,7 @@ function SettingsDeepLink({ show }: { show: () => void }) {
 
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
-  const show = useCallback(() => setOpen(true), []);
+  const show = useCallback(() => { trackUsage("settings_opened"); setOpen(true); }, []);
   return <SettingsContext.Provider value={{ open, show }}>
     {children}
     <Suspense fallback={null}><SettingsDeepLink show={show} /></Suspense>
