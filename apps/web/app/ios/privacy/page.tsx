@@ -22,10 +22,12 @@ export default function IOSPrivacyPage() {
           <p>Transcript text saves as you speak. Stopping, an interruption, or moving the app into the background stops recording. After a crash, the latest words that had not yet been saved may be lost.</p>
         </section>
         <section>
-          <h2 className="text-base">Optional OpenAI cleanup</h2>
-          <p>By default, cleanup runs on your iPhone. If you add your own OpenAI API key and explicitly allow text cleanup, the current dictated passage is sent directly to OpenAI after you stop. Audio and other entries are not sent.</p>
-          <p>The key and your consent are stored in this iPhone’s Keychain with device-only access. Requests disable response storage, but OpenAI may retain data according to its API policies. Usage is charged to your OpenAI account. You can turn off this feature and remove the key in the app’s Settings.</p>
-          <a className="underline underline-offset-4" href="https://openai.com/policies/privacy-policy/" target="_blank" rel="noreferrer noopener">OpenAI privacy policy</a>
+          <h2 className="text-base">On-device cleanup</h2>
+          <p>After dictation stops, cleanup removes clear English fillers and tidies punctuation on your iPhone. No text is sent to an AI service, and no API key or account is required. Other languages retain the speech framework’s transcript. You can undo cleanup to restore the original words.</p>
+        </section>
+        <section>
+          <h2 className="text-base">Voluntary support</h2>
+          <p>If you choose “support freewrite,” Stripe’s checkout opens in your browser. Stripe processes your payment and may receive network information such as your IP address. freewrite does not receive your full card number. A payment is optional and does not unlock app features.</p>
         </section>
         <section>
           <h2 className="text-base">Contact</h2>

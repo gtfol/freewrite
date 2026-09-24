@@ -47,12 +47,9 @@ import Speech
         let speech = SpeechTranscriber(locale: locale, transcriptionOptions: [],
                                        reportingOptions: [.volatileResults], attributeOptions: [])
         do {
-            let reserved = await AssetInventory.reservedLocales
-            if !reserved.contains(locale) {
-                guard try await AssetInventory.reserve(locale: locale) else { throw WritingError.modelDownload }
-                // Keep the app's locale reservation so the on-device model stays cached.
-                try check(id)
-            }
+            // This API reserves locale variants automatically and returns nil
+            // for an installed model. Don't compare locale identities or treat
+            // reserve(locale:)'s "already reserved" false result as a failure.
             if let request = try await AssetInventory.assetInstallationRequest(supporting: [speech]) {
                 try check(id)
                 output?.yield(.downloading(request.progress.fractionCompleted))

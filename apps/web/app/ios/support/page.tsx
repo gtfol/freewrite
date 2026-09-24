@@ -11,7 +11,7 @@ export default function IOSSupportPage() {
       <div className="mt-8 space-y-6">
         <section>
           <h2 className="text-base">Write or dictate</h2>
-          <p>Start writing, or tap the microphone to dictate at the cursor. Tap again to stop. The timer starts a 15-minute session; history opens your saved entries. In Settings, you can optionally lock backspace or enable cleanup with your own OpenAI key.</p>
+          <p>Start writing, or tap the microphone to dictate at the cursor. Tap again to stop. The timer starts a 15-minute session; history opens your saved entries. In Settings, you can optionally lock backspace. Tap the information buttons to learn about backspace locking and dictation.</p>
         </section>
         <section>
           <h2 className="text-base">If dictation is unavailable</h2>
@@ -25,7 +25,7 @@ export default function IOSSupportPage() {
         </section>
         <section>
           <h2 className="text-base">Cleanup and undo</h2>
-          <p>After dictation, “undo cleanup” restores the original transcript. If optional OpenAI cleanup fails, your raw text remains. Check connectivity and your own API account, or remove the key in Settings to return to on-device cleanup.</p>
+          <p>Cleanup runs on your iPhone after dictation stops. It removes clear English fillers and tidies punctuation without rewriting your words. Other languages retain the original transcript. “Undo cleanup” restores the exact original transcript.</p>
         </section>
         <section>
           <h2 className="text-base">Contact</h2>

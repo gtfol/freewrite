@@ -38,19 +38,17 @@ struct Entry: Codable, Identifiable, Equatable, Sendable {
 
 enum WritingError: Error, LocalizedError, Equatable {
     case microphoneDenied, unavailable, unsupportedLanguage, modelDownload
-    case interrupted, audio, cleanup, consent, keychain, storage
+    case interrupted, audio, cleanup, storage
 
     var errorDescription: String? {
         switch self {
         case .microphoneDenied: "microphone access is off. allow it in Settings to dictate."
         case .unavailable: "on-device dictation isn’t available on this device. you can keep typing."
         case .unsupportedLanguage: "on-device dictation doesn’t support your language yet. you can keep typing."
-        case .modelDownload: "the speech model couldn’t download. check your connection and try again."
+        case .modelDownload: "the speech model couldn’t be prepared. try again in a moment."
         case .interrupted: "dictation stopped after an interruption. your text is still here."
         case .audio: "dictation stopped. your text is still here. tap the microphone to try again."
         case .cleanup: "cleanup didn’t finish. your original words are still here."
-        case .consent: "enable text cleanup in settings before sending text to OpenAI."
-        case .keychain: "the key couldn’t be accessed. unlock your iPhone and try again."
         case .storage: "your latest words couldn’t be saved. keep this entry open and retry."
         }
     }

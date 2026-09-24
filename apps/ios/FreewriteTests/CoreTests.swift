@@ -62,18 +62,14 @@ final class CoreTests: XCTestCase {
         insertion.receive("More words.", isFinal: true)
         XCTAssertEqual(insertion.transcript, "Hello there. More words.")
     }
-    func testRequestIsTextOnlyAndStorageDisabled() throws {
-        let request = try OpenAITextCleaner.request(text: "um hello", credential: .init(key: "synthetic-test-key", consent: true))
-        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
-        XCTAssertEqual(object["store"] as? Bool, false)
-        XCTAssertEqual(request.url?.absoluteString, "https://api.openai.com/v1/responses")
-        XCTAssertEqual(request.httpMethod, "POST")
-        let input = try XCTUnwrap(object["input"] as? [[String: Any]])
-        let content = try XCTUnwrap(input.first?["content"] as? [[String: String]])
-        XCTAssertEqual(content, [["type": "input_text", "text": "um hello"]])
-        XCTAssertFalse(String(decoding: request.httpBody!, as: UTF8.self).contains("synthetic-test-key"))
-        XCTAssertThrowsError(try OpenAITextCleaner.request(text: "private", credential: .init(key: "test", consent: false)))
+    func testCleanupRespectsLanguage() async throws {
+        let english = try await OnDeviceTextCleaner(locale: Locale(identifier: "en_US")).clean("um i am ready")
+        XCTAssertEqual(english, "I am ready.")
+        let original = "Um café, por favor"
+        let portuguese = try await OnDeviceTextCleaner(locale: Locale(identifier: "pt_BR")).clean(original)
+        XCTAssertEqual(portuguese, original)
     }
+
 }
 
 @MainActor final class TimerTests: XCTestCase {
