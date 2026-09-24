@@ -1,6 +1,6 @@
 # Verification
 
-Verified September 23, 2026 with Xcode 26.6 (17F113), Swift 6.3.3, and the iOS 26.5 iPhone 17 Pro simulator. No physical iPhone or live OpenAI credential was used.
+Verified September 23, 2026 with Xcode 26.6 (17F113), Swift 6.3.3, and the iOS 26.5 iPhone 17 Pro simulator. A signed Release build was also installed successfully on an iPhone 14 Pro running iOS 26.6.1. Live dictation and interruption checks on that phone remain pending; no live OpenAI credential was used.
 
 ## Automated checks
 
@@ -26,7 +26,8 @@ The simulator checks verify the editor, persistence, and error presentation. The
 
 ## Physical iPhone checklist
 
-- [ ] Set the final bundle ID and signing team, install on a supported iPhone running iOS 26 or newer, and verify SpeechTranscriber hardware/language availability.
+- [x] Register `dev.gtfol.freewrite` under gtfol, LLC, create a signed Release archive, and install it on the connected iPhone 14 Pro.
+- [ ] Verify SpeechTranscriber hardware/language availability on the installed physical iPhone.
 - [ ] On first use, allow the microphone and watch model download progress. Cancel during installation; retry, including after a failed/offline download.
 - [ ] After model installation, dictate in airplane mode. Verify live interim corrections, finalized phrases without duplicates, pauses, long continuous speech, and the last words arriving after Stop.
 - [ ] Compare built-in mic and Bluetooth input in quiet/noisy surroundings. Confirm the audio engine stops when the user taps Stop.

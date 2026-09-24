@@ -40,6 +40,11 @@ struct SettingsView: View {
                     Text("uses gpt-4.1-mini with your own API account. only the dictated passage is sent, never audio or other entries. the key stays in this iPhone’s Keychain. requests disable response storage; OpenAI’s provider retention policies still apply.")
                         .font(FreewriteStyle.caption).foregroundStyle(FreewriteStyle.secondary)
                     if let message { Text(message).font(FreewriteStyle.caption) }
+                    Rectangle().fill(FreewriteStyle.divider).frame(height: 0.5)
+                    Link("help and support", destination: URL(string: "https://freewrite.gtfol.dev/ios/support")!)
+                        .frame(minHeight: 44)
+                    Link("privacy", destination: URL(string: "https://freewrite.gtfol.dev/ios/privacy")!)
+                        .frame(minHeight: 44)
                 }.padding(20)
             }
         }.freewriteScreen()
