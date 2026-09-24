@@ -1,0 +1,105 @@
+apps/ios/Freewrite/Core/TextCleaner.swift
+  s_ed36ef5ee1b507::t_fdf35751b9fca7 1-9,11,14-46
+  s_ed36ef5ee1b507::t_9ac833461588b0 10,12-13
+apps/ios/Freewrite/Info.plist
+  s_ed36ef5ee1b507::t_85336266bdeb41 1-16
+.github/workflows/ios.yml
+  s_ed36ef5ee1b507::t_1e9d19e88e5e09 1-46
+apps/ios/Freewrite/Core/Entry.swift
+  s_ed36ef5ee1b507::t_fdf35751b9fca7 1-57
+apps/ios/Freewrite/Core/OpenAITextCleaner.swift
+  s_ed36ef5ee1b507::t_3091c5e61b4caa 1-62,64-69
+  s_ed36ef5ee1b507::t_80c2660618b5ee 63
+apps/ios/FreewriteTests/PersistenceTests.swift
+  s_ed36ef5ee1b507::t_96ee999b4e227b 1-38
+apps/ios/Freewrite/UI/SettingsView.swift
+  s_ed36ef5ee1b507::t_85336266bdeb41 1-60
+apps/ios/Freewrite/UI/HistoryView.swift
+  s_ed36ef5ee1b507::t_85336266bdeb41 1-41
+apps/ios/Freewrite/UI/WritingEditor.swift
+  s_ed36ef5ee1b507::t_80c2660618b5ee 31,46-52,59,76,82-84
+  s_ed36ef5ee1b507::t_85336266bdeb41 1-30,32-45,53-58,60-63,67-73,75,77-81,85-89
+  s_ed36ef5ee1b507::t_5fe617fb0e5400 64-66,74
+apps/ios/Freewrite/FreewriteApp.swift
+  s_ed36ef5ee1b507::t_c94c150ad90040 22-24
+  s_ed36ef5ee1b507::t_85336266bdeb41 1-21,25-30
+apps/ios/Freewrite/UI/Interface.swift
+  s_ed36ef5ee1b507::t_85336266bdeb41 1-31
+apps/ios/Freewrite/Core/Transcriber.swift
+  s_ed36ef5ee1b507::t_fdf35751b9fca7 1-14
+apps/ios/FreewriteTests/EditorTests.swift
+  s_ed36ef5ee1b507::t_c94c150ad90040 1-7,27-40,42,44-47,49-50,58-65
+  s_ed36ef5ee1b507::t_5fe617fb0e5400 8-26
+  s_ed36ef5ee1b507::t_5cd71fab498cbd 41,43,48,51-57
+apps/ios/Freewrite/Persistence/StoredEntry.swift
+  s_ed36ef5ee1b507::t_3091c5e61b4caa 1-44
+apps/ios/scripts/test-ios.sh
+  s_ed36ef5ee1b507::t_fc5e55843c899b 1-23
+README.md
+  s_ed36ef5ee1b507::t_1e9d19e88e5e09 8,12,18
+  s_ed36ef5ee1b507::t_8c3dac7f771e77 19
+apps/ios/docs/verification.md
+  s_ed36ef5ee1b507::t_bd9f8882367236 1-43
+apps/ios/Freewrite/Core/TextInsertion.swift
+  s_ed36ef5ee1b507::t_b9f18829fb50db 5-9
+  s_ed36ef5ee1b507::t_fdf35751b9fca7 1-4,10-53
+apps/ios/Freewrite/Core/SessionTimer.swift
+  s_ed36ef5ee1b507::t_fdf35751b9fca7 1-24
+apps/ios/FreewriteTests/CoreTests.swift
+  s_ed36ef5ee1b507::t_9ac833461588b0 11
+  s_ed36ef5ee1b507::t_96ee999b4e227b 1-10,12-88
+apps/ios/FreewriteTests/CleanerNetworkTests.swift
+  s_ed36ef5ee1b507::t_9ac833461588b0 1-56
+apps/ios/scripts/make-icon.swift
+  s_ed36ef5ee1b507::t_5cd71fab498cbd 1-23
+apps/ios/Freewrite/UI/WriteView.swift
+  s_ed36ef5ee1b507::t_85336266bdeb41 1-116
+apps/ios/README.md
+  s_ed36ef5ee1b507::t_1e9d19e88e5e09 1-66
+apps/ios/FreewriteTests/WriterTests.swift
+  s_ed36ef5ee1b507::t_96ee999b4e227b 1-39,41-138
+  s_ed36ef5ee1b507::t_cb2903bceb159c 40
+apps/ios/.gitignore
+  s_ed36ef5ee1b507::t_fdf35751b9fca7 1-6
+apps/ios/Freewrite/Core/Credentials.swift
+  s_ed36ef5ee1b507::t_3091c5e61b4caa 1-42
+apps/ios/Package.swift
+  s_ed36ef5ee1b507::t_fdf35751b9fca7 2-13
+  s_ed36ef5ee1b507::t_96ee999b4e227b 1
+apps/ios/Freewrite/Core/WriterModel.swift
+  s_ed36ef5ee1b507::t_80c2660618b5ee 26
+  s_ed36ef5ee1b507::t_57e64e70a064c3 181-183
+  s_ed36ef5ee1b507::t_3091c5e61b4caa 1-25,27-180,184-220
+apps/ios/Freewrite/Core/AppleTranscriber.swift
+  s_ed36ef5ee1b507::t_57e64e70a064c3 8,53-54,107,155,157
+  s_ed36ef5ee1b507::t_cb2903bceb159c 200,203,208-221
+  s_ed36ef5ee1b507::t_48cea49e6beebb 1-7,9-52,55-106,108-154,156,158-199,201-202,204-207,222-224
+apps/ios/Freewrite.xcodeproj/project.pbxproj
+  s_ed36ef5ee1b507::t_d4878752a10c64 1-523
+apps/ios/Freewrite.xcodeproj/xcshareddata/xcschemes/Freewrite.xcscheme
+  s_ed36ef5ee1b507::t_233770b3362bc3 1-11
+apps/ios/Freewrite/Assets.xcassets/AppIcon.appiconset/Contents.json
+  s_ed36ef5ee1b507::t_19b704280c3982 1-14
+apps/ios/Freewrite/Assets.xcassets/Contents.json
+  s_ed36ef5ee1b507::t_75e5aab5fc71a4 1-6
+apps/ios/Freewrite/Resources/Lato-OFL.txt
+  s_ed36ef5ee1b507::t_209898596667f8 1-93
+apps/ios/scripts/generate-project.py
+  s_ed36ef5ee1b507::t_7b5515e1b7edc9 1-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0a1cce16ef1cdda29579356a98713e353a4d5cb0",
+  "prompts": {},
+  "sessions": {
+    "s_ed36ef5ee1b507": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d08a-bb45-7cc2-b052-ae3dfead9767",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
