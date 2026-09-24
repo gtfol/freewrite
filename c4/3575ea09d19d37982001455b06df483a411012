@@ -1,0 +1,37 @@
+apps/ios/scripts/archive-ios.sh
+  s_ed36ef5ee1b507::t_f8e70099e09dd7 1-38
+apps/ios/Freewrite/UI/SettingsView.swift
+  s_ed36ef5ee1b507::t_20002be451d3c0 43-47
+apps/web/app/ios/privacy/page.tsx
+  s_ed36ef5ee1b507::t_20002be451d3c0 1-38
+apps/web/app/ios/support/page.tsx
+  s_ed36ef5ee1b507::t_20002be451d3c0 1-38
+apps/ios/Freewrite/Info.plist
+  s_ed36ef5ee1b507::t_7850746aead507 12
+apps/ios/README.md
+  s_ed36ef5ee1b507::t_f8e70099e09dd7 5,11-19
+apps/ios/docs/verification.md
+  s_ed36ef5ee1b507::t_212041244db5d7 3,29-30
+apps/ios/Freewrite/Resources/PrivacyInfo.xcprivacy
+  s_ed36ef5ee1b507::t_7850746aead507 1-19
+apps/ios/Freewrite.xcodeproj/project.pbxproj
+  s_ed36ef5ee1b507::t_67520a3c247852 158-163,184,307-310,314,400,421,445,461
+apps/ios/scripts/generate-project.py
+  s_ed36ef5ee1b507::t_1b08feb21761a9 47-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c43575ea09d19d37982001455b06df483a411012",
+  "prompts": {},
+  "sessions": {
+    "s_ed36ef5ee1b507": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d08a-bb45-7cc2-b052-ae3dfead9767",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
