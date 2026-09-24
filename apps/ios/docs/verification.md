@@ -5,12 +5,19 @@ Verified September 23, 2026 with Xcode 26.6 (17F113), Swift 6.3.3, and the iOS 2
 ## Automated checks
 
 - `swift test`: 23 tests passed.
-- `FREEWRITE_DERIVED_DATA=/private/tmp/freewrite-ios-20260923 scripts/test-ios.sh`: 28 simulator tests passed; Debug simulator and unsigned Release device builds succeeded without warnings.
+- `FREEWRITE_DERIVED_DATA=/private/tmp/freewrite-release-tests-20260923 scripts/test-ios.sh`: 29 simulator tests passed; Debug simulator and unsigned Release device builds succeeded without warnings.
 - Regenerating `Freewrite.xcodeproj` is deterministic. Swift 6 strict concurrency and warnings-as-errors are enabled.
 - Cleaner checks cover fillers, meaningful “like,” retained words, paragraphs, Unicode, and punctuation. Mocked Responses API checks cover text-only requests, `store: false`, incomplete responses, service errors, and rejected rewrites. No external cleanup request was sent.
 - Entry checks cover the web JSON shape, Unix millisecond dates, null/missing deletion dates, SwiftData reopen, and tombstones. Keychain checks use a separate temporary service and remove their test values.
 - Writer checks cover finalized-text checkpoints before Stop, saving provisional words while still recording, cleanup failure, interruption, insertion at a Unicode cursor, surrounding edits, overlapping edits, late cleanup, save failure/retry, and backspace lock.
 - UIKit checks exercise the native undo manager restoring raw dictation and verify typing publishes only after UIKit commits the edit. This prevents SwiftUI redraws from disturbing in-flight insertion.
+- The audio callback regression test constructs the production tap on MainActor and invokes it on a detached task with synthetic 48 kHz stereo audio. Conversion produces a 16 kHz mono analyzer input without an actor-isolation trap.
+
+## First device test and correction
+
+The first iPhone microphone attempt crashed as recording began after the model download. The device crash report (`Freewrite-2026-09-23-202037.ips`) shows `_dispatch_assert_queue_fail` through Swift's executor check on `RealtimeMessenger.mServiceQueue`, called by `AVAudioNodeTap`. The tap closure had inherited MainActor from setup even though AVAudioEngine calls it off-actor.
+
+Build 2 creates that callback in the nonisolated audio bridge with an explicit `@Sendable` function type. It passed the 29-test simulator suite and installed on the same physical phone. A repeated physical dictation check is pending.
 
 ## Simulator walkthrough
 
