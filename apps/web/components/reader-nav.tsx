@@ -180,6 +180,9 @@ export function ReaderNav({
     return (
       <nav className="fixed inset-x-0 bottom-0 z-40 bg-background" onMouseDown={(event) => event.preventDefault()}>
         {banner}
+        <p className="mx-auto max-w-[650px] px-6 pt-3 text-center font-sans text-xs text-muted-foreground">
+          Edit any text, or select and delete what you don’t need. Nothing is saved until Done.
+        </p>
         <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-6 py-4 text-[13px]">
           <button
             type="button"

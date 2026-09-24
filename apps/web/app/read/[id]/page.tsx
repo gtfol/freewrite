@@ -199,17 +199,11 @@ export default function ArticlePage({
   return (
     <main className="min-h-dvh">
       <div ref={wrapRef} className="relative mx-auto max-w-[650px] px-6 pt-14 pb-32">
-        {edit && (
-          <p className="mb-8 font-sans text-xs text-muted-foreground">
-            Edit any text, or select and delete what you don’t need. Nothing is saved until Done.
-          </p>
-        )}
         <article
           ref={bodyRef}
           style={{ fontFamily: "var(--font-crimson), Georgia, serif" }}
         >
-          {edit ? <h1 className="text-3xl leading-tight">{article.title}</h1>
-            : <ArticleTitle title={article.title} onRename={rename} />}
+          <ArticleTitle title={article.title} onRename={rename} readOnly={editActive} />
           <p className="mt-3 font-sans text-xs text-muted-foreground">
             {meta}
             {meta && originalUrl && " · "}

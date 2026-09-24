@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
+import { useLayoutEffect, useImperativeHandle, useRef, type Ref } from "react";
 
 export interface ArticleEditorHandle {
   content: () => string;
@@ -20,11 +20,13 @@ export function ArticleEditor({ initial, editorRef, onChange, disabled }: {
   const initialDOM = useRef("");
   const restored = useRef<{ html: string; dom: string } | null>(null);
 
-  useEffect(() => {
+  // Populate before paint so the page never collapses to an empty editor,
+  // and focus without pulling the reader back to the start of the article.
+  useLayoutEffect(() => {
     const editor = element.current!;
     editor.innerHTML = initial;
     initialDOM.current = editor.innerHTML;
-    editor.focus();
+    editor.focus({ preventScroll: true });
   }, [initial]);
 
   function report() {
