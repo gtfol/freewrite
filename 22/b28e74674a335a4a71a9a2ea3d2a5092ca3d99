@@ -1,0 +1,64 @@
+apps/ios/FreewriteTests/AccountTests.swift
+  s_ed36ef5ee1b507::t_d721f53fb95ed6 1-119
+apps/web/lib/server/ios-auth.ts
+  s_ed36ef5ee1b507::t_f67b3107ddeff9 1-129
+  s_ed36ef5ee1b507::t_f48844ff8e12a8 130
+apps/ios/Freewrite/Info.plist
+  s_ed36ef5ee1b507::t_908fe7b725603e 13-16
+apps/web/lib/server/ios-auth.test.ts
+  s_ed36ef5ee1b507::t_f2fe949d670556 1-101
+apps/ios/Freewrite/Core/FreewriteSignIn.swift
+  s_ed36ef5ee1b507::t_9e50631f83087a 1-103,108-128
+  s_ed36ef5ee1b507::t_d721f53fb95ed6 104-107
+apps/ios/Freewrite/UI/BrowserSignIn.swift
+  s_ed36ef5ee1b507::t_9e50631f83087a 1-6,8-9,13-30,33-34
+  s_ed36ef5ee1b507::t_77549300b0f45c 7,10-12,31-32
+apps/ios/Freewrite/FreewriteApp.swift
+  s_ed36ef5ee1b507::t_908fe7b725603e 7-9,13
+apps/ios/Freewrite/Core/AccountCredentialStore.swift
+  s_ed36ef5ee1b507::t_9e50631f83087a 1-39
+apps/web/lib/server/ios-routes.ts
+  s_ed36ef5ee1b507::t_f67b3107ddeff9 1-9
+apps/ios/Freewrite/Core/AccountModel.swift
+  s_ed36ef5ee1b507::t_9e50631f83087a 1-57
+apps/ios/Freewrite/UI/SettingsView.swift
+  s_ed36ef5ee1b507::t_908fe7b725603e 5-8,15-16,48-92
+apps/ios/Freewrite.xcodeproj/project.pbxproj
+  s_ed36ef5ee1b507::t_b7f7a05b90b651 8-19,32-37,86-91,134-139,220,226,235-242,251-254,287-290,322,325-328,352,465,486
+apps/ios/Freewrite/Resources/PrivacyInfo.xcprivacy
+  s_ed36ef5ee1b507::t_4eae28be6c342b 5-58
+apps/ios/README.md
+  s_ed36ef5ee1b507::t_75a8ca12a4f99e 19,45-46,51,72,77-82
+apps/ios/scripts/generate-project.py
+  s_ed36ef5ee1b507::t_c8e49a6ea20f64 47
+apps/web/app/api/ios/account/route.ts
+  s_ed36ef5ee1b507::t_13c0418740951c 1-4
+apps/web/app/api/ios/authorize/route.ts
+  s_ed36ef5ee1b507::t_d6d1fbf57c40aa 1-4
+apps/web/app/api/ios/exchange/route.ts
+  s_ed36ef5ee1b507::t_6a23f11213d043 1-4
+apps/web/app/api/ios/session/route.ts
+  s_ed36ef5ee1b507::t_de927297537db8 1-5
+apps/web/app/ios/connect/page.tsx
+  s_ed36ef5ee1b507::t_915c8824e8abf0 1-14
+apps/web/app/ios/privacy/page.tsx
+  s_ed36ef5ee1b507::t_0538a7b8a9f9fe 11,13,16,19-23
+apps/web/components/ios-connect.tsx
+  s_ed36ef5ee1b507::t_9545f425133736 1-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "22b28e74674a335a4a71a9a2ea3d2a5092ca3d99",
+  "prompts": {},
+  "sessions": {
+    "s_ed36ef5ee1b507": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d08a-bb45-7cc2-b052-ae3dfead9767",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
