@@ -1,0 +1,42 @@
+apps/web/lib/article-edit.test.ts
+  s_ed36ef5ee1b507::t_13b66ba4ae9697 1-69
+apps/web/README.md
+  s_ed36ef5ee1b507::t_ecfa3651b187b0 22,28-34
+  s_ed36ef5ee1b507::t_de37db7d2a4d62 35
+apps/web/lib/types.ts
+  s_ed36ef5ee1b507::t_1c07aade84b5d1 77
+apps/web/docs/reader-editing.md
+  s_ed36ef5ee1b507::t_ecfa3651b187b0 1-21
+apps/web/components/article-editor.tsx
+  s_ed36ef5ee1b507::t_13b66ba4ae9697 31
+  s_ed36ef5ee1b507::t_bbf674164b2506 49-50
+  s_ed36ef5ee1b507::t_09d73107a731ae 21,36-40
+  s_ed36ef5ee1b507::t_1c07aade84b5d1 1-20,22-30,32-35,41-47,51-76
+  s_ed36ef5ee1b507::t_ecfa3651b187b0 48
+apps/web/lib/db.ts
+  s_ed36ef5ee1b507::t_1c07aade84b5d1 239-270
+apps/web/app/read/[id]/page.tsx
+  s_ed36ef5ee1b507::t_986fd042c294d2 19-20,31,36,38-39,52-55,62,75-76,78,86,90,93,109-116,163-170,172-178,181-185,187-195,202,204,211-212,225-227,236,250,255-256
+apps/web/components/reader-nav.tsx
+  s_ed36ef5ee1b507::t_f4760231304fb8 139,141,160,167,179,181-182,186-187,190,195-196,201,204,210,252,255-256
+apps/web/lib/article-html.ts
+  s_ed36ef5ee1b507::t_4ee65121a39967 1-74
+apps/web/lib/extract.ts
+  s_ed36ef5ee1b507::t_48dd5e197caaee 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1d0dc5ec4dcc87e68d7086cd29e9a85fdc5d8ef7",
+  "prompts": {},
+  "sessions": {
+    "s_ed36ef5ee1b507": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d08a-bb45-7cc2-b052-ae3dfead9767",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
