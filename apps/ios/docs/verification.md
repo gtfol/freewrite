@@ -1,6 +1,6 @@
 # Verification
 
-Verified September 23, 2026 with Xcode 26.6 (17F113), Swift 6.3.3, and the iOS 26.5 iPhone 17 Pro simulator. A signed Release build was also installed successfully on an iPhone 14 Pro running iOS 26.6.1. Live dictation and interruption checks on that phone remain pending; no live OpenAI credential was used.
+Verified September 23, 2026 with Xcode 26.6 (17F113), Swift 6.3.3, and the iOS 26.5 iPhone 17 Pro simulator. A signed Release build was also installed successfully on an iPhone 14 Pro running iOS 26.6.1. The owner confirmed that build 2's live dictation works and keeps the transcript after Stop. Extended interruption checks remain pending; no live OpenAI credential was used.
 
 ## Automated checks
 
@@ -17,7 +17,7 @@ Verified September 23, 2026 with Xcode 26.6 (17F113), Swift 6.3.3, and the iOS 2
 
 The first iPhone microphone attempt crashed as recording began after the model download. The device crash report (`Freewrite-2026-09-23-202037.ips`) shows `_dispatch_assert_queue_fail` through Swift's executor check on `RealtimeMessenger.mServiceQueue`, called by `AVAudioNodeTap`. The tap closure had inherited MainActor from setup even though AVAudioEngine calls it off-actor.
 
-Build 2 creates that callback in the nonisolated audio bridge with an explicit `@Sendable` function type. It passed the 29-test simulator suite and installed on the same physical phone. A repeated physical dictation check is pending.
+Build 2 creates that callback in the nonisolated audio bridge with an explicit `@Sendable` function type. It passed the 29-test simulator suite and installed on the same physical phone. The owner repeated the microphone test and confirmed the app stays open, transcribes speech, and retains the text after Stop. The build also uploaded successfully for internal TestFlight testing.
 
 ## Simulator walkthrough
 
@@ -34,7 +34,7 @@ The simulator checks verify the editor, persistence, and error presentation. The
 ## Physical iPhone checklist
 
 - [x] Register `dev.gtfol.freewrite` under gtfol, LLC, create a signed Release archive, and install it on the connected iPhone 14 Pro.
-- [ ] Verify SpeechTranscriber hardware/language availability on the installed physical iPhone.
+- [x] Verify SpeechTranscriber hardware/language availability on the installed physical iPhone: live transcription confirmed by the owner on build 2.
 - [ ] On first use, allow the microphone and watch model download progress. Cancel during installation; retry, including after a failed/offline download.
 - [ ] After model installation, dictate in airplane mode. Verify live interim corrections, finalized phrases without duplicates, pauses, long continuous speech, and the last words arriving after Stop.
 - [ ] Compare built-in mic and Bluetooth input in quiet/noisy surroundings. Confirm the audio engine stops when the user taps Stop.
