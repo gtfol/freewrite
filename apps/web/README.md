@@ -19,11 +19,19 @@ npm run dev
 
 ## local PDFs
 
-in Read, choose a PDF or drop one onto the import area. PDF.js extracts its text in your browser; edit the title and text preview, then save. progress and cancel are available while extracting. saved text works with Listen, highlights, and Trim.
+in Read, choose a PDF or drop one onto the import area. PDF.js extracts its text in your browser; edit the title and text preview, then save. progress and cancel are available while extracting. saved text works with Listen, highlights, and Edit.
 
 imports accept selectable-text PDFs up to 20 MB, 300 pages, and 250,000 text characters. scanned PDFs need text recognition in another app first; password-protected files need an unlocked copy. columns and tables may need editing in the preview.
 
 the original PDF stays in IndexedDB on the importing device, where **Original** opens it. optional sync transfers the extracted text and article metadata, not the file; other devices can read and listen without the original. deleting the article also removes its local original. PDF.js worker and font assets are served by this app, with no document uploads to an extraction service. no new SQL migration or environment variables are needed.
+
+## edit imported reading
+
+open any saved article or PDF and choose **Edit**. select and delete individual words, replace sentences, type, or paste text directly into the article. paragraphs, headings, links, and other imported formatting stay in place. writing-only slash commands are not enabled.
+
+**Done** saves, **Cancel** discards this session, and **Undo** (or the browser's keyboard shortcut) reverses edits. **Restore original** brings back the original import, even after several saved edits; that restoration can also be undone or cancelled. edits update the reading copy, leaving an imported PDF file intact. highlighting and playback pause while editing. retained notes reattach by their quoted text where possible.
+
+edits remain in the open editor until Done; reloading with changes prompts before discarding them. save failures keep the editor open. a newer synced body or deletion produces a conflict instead of being overwritten. see [reader editing verification](docs/reader-editing.md), including the corresponding future iOS reader behavior.
 
 ## listen
 

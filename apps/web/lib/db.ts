@@ -236,6 +236,38 @@ export async function putArticle(article: Article): Promise<void> {
   await markDirty("articles", article.id);
 }
 
+// Compare and save inside one transaction: an open editor must not overwrite
+// a newer synced body, resurrect a deletion, or lose concurrent metadata edits.
+export async function saveArticleContent(id: string, expected: string, content: string, wordCount: number): Promise<Article> {
+  const db = await openDb();
+  const tx = guardedWrite(db, [ARTICLES, OUTBOX]);
+  let updated: Article;
+  let conflict: Error | undefined;
+  const result = new Promise<Article>((resolve, reject) => {
+    tx.oncomplete = () => resolve(updated);
+    tx.onerror = () => reject(tx.error ?? new Error("Couldn't save this edit."));
+    tx.onabort = () => reject(conflict ?? tx.error ?? new Error("Couldn't save this edit."));
+  });
+  const request = tx.objectStore(ARTICLES).get(id) as IDBRequest<Article | undefined>;
+  request.onsuccess = () => {
+    const current = request.result;
+    if (!current || current.deletedAt || current.content !== expected) {
+      conflict = new Error("This article changed elsewhere. Your edit is still here; copy it before cancelling and reopening the latest version.");
+      tx.abort();
+      return;
+    }
+    updated = normalizeArticle(current);
+    if (content === expected) return;
+    const now = Date.now();
+    updated = { ...updated, content, wordCount, contentOriginal: current.contentOriginal ?? current.content, updatedAt: now };
+    tx.objectStore(ARTICLES).put(updated);
+    tx.objectStore(OUTBOX).put({ key: `articles:${id}`, collection: "articles", id, addedAt: now });
+  };
+  const saved = await result;
+  if (content !== expected) onLocalChange?.();
+  return saved;
+}
+
 export interface LocalPdf { articleId: string; name: string; file: Blob; }
 export const getPdfOriginal = (articleId: string) => get<LocalPdf>(PDFS, articleId);
 
