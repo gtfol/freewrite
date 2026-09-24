@@ -9,7 +9,7 @@ export function SettingsLink() {
   return <TooltipProvider><Tooltip><TooltipTrigger asChild>
     <button type="button" data-settings-trigger aria-haspopup="dialog" aria-expanded={open} onClick={() => {useWriter.getState().flush(); show();}} aria-label="Settings"
       className="flex items-center text-muted-foreground transition-colors hover:text-foreground">
-      <Settings size={14} strokeWidth={1.5} />
+      <Settings className="size-4" />
     </button>
   </TooltipTrigger><TooltipContent side="top">Settings</TooltipContent></Tooltip></TooltipProvider>;
 }

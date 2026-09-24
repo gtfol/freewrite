@@ -30,9 +30,11 @@ const editorButtonClass = `mt-[0.1em] ${iconButtonClass}`;
 export function ArticleTitle({
   title,
   onRename,
+  readOnly = false,
 }: {
   title: string;
   onRename: (title: string) => void;
+  readOnly?: boolean;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -93,9 +95,13 @@ export function ArticleTitle({
             onClick={() => setDraft(title)}
             title="Rename"
             aria-label="Rename"
+            disabled={readOnly}
             className={cn(
               iconButtonClass,
-              "ml-1.5 -translate-y-[0.1em] align-middle opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+              "ml-1.5 -translate-y-[0.1em] align-middle opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
+              // Reserve the same space while editing the body, including when
+              // the pencil wraps onto a new line after a long title.
+              readOnly && "invisible"
             )}
           >
             <Pencil className="size-4" />
