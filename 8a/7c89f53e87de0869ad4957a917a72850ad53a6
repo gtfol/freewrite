@@ -1,0 +1,25 @@
+apps/ios/Freewrite/Core/FreewriteSignIn.swift
+  s_ed36ef5ee1b507::t_bfe6f55ac91d82 41,106
+apps/ios/FreewriteTests/AccountTests.swift
+  s_ed36ef5ee1b507::t_3d95f9c148aab3 54
+apps/web/lib/server/ios-auth.test.ts
+  s_ed36ef5ee1b507::t_a1ed2a49ac06af 38
+apps/web/lib/server/ios-auth.ts
+  s_ed36ef5ee1b507::t_4e31aad2b5a210 6,22,89,97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8a7c89f53e87de0869ad4957a917a72850ad53a6",
+  "prompts": {},
+  "sessions": {
+    "s_ed36ef5ee1b507": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d08a-bb45-7cc2-b052-ae3dfead9767",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
