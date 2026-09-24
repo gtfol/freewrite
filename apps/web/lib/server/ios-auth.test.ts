@@ -35,6 +35,7 @@ test("authorization accepts only opaque S256 challenge/state and no callback ove
   assert.equal(iosAuthorization({ code_challenge: [challenge], state }), null);
   assert.equal(iosAuthorization({ code_challenge: challenge, state, redirect_uri: "https://evil.test" }), null);
   assert.equal(iosAuthorization({ code_challenge: "plain", state }), null);
+  assert.equal(iosAuthorization({ code_challenge: challenge + "\n", state }), null);
 });
 test("browser authorization requires same origin, signed-in account, and explicit account match", async () => {
   const f = fixture();

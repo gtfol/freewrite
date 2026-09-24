@@ -51,7 +51,7 @@ private actor AccountStub: AccountTransport {
         let attempt = FreewriteSignInRequest(verifier: "unused", state: state)
         let valid = "dev.gtfol.freewrite://auth/callback?code=\(code)&state=\(state)"
         XCTAssertEqual(try attempt.code(from: URL(string: valid)!), code)
-        for value in [valid + "&state=\(state)", valid + "&code=\(code)", valid + "#fragment", valid.replacingOccurrences(of: "auth/", with: "evil/"), valid.replacingOccurrences(of: "state=\(state)", with: "state=wrong"), valid.replacingOccurrences(of: "://auth", with: "://user@auth"), valid.replacingOccurrences(of: "://auth", with: "://auth:443"), valid.replacingOccurrences(of: "dev.gtfol.freewrite:", with: "https:")] {
+        for value in [valid.replacingOccurrences(of: "code=\(code)", with: "code=\(code)%0A"), valid + "&state=\(state)", valid + "&code=\(code)", valid + "#fragment", valid.replacingOccurrences(of: "auth/", with: "evil/"), valid.replacingOccurrences(of: "state=\(state)", with: "state=wrong"), valid.replacingOccurrences(of: "://auth", with: "://user@auth"), valid.replacingOccurrences(of: "://auth", with: "://auth:443"), valid.replacingOccurrences(of: "dev.gtfol.freewrite:", with: "https:")] {
             XCTAssertThrowsError(try attempt.code(from: URL(string: value)!))
         }
     }

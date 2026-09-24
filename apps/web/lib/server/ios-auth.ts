@@ -3,7 +3,7 @@ import type { Pool } from "pg";
 import { deleteAccount } from "./account-deletion.ts";
 
 export const IOS_CALLBACK = "dev.gtfol.freewrite://auth/callback";
-const opaque = /^[A-Za-z0-9_-]{43}$/;
+const opaque = (value: unknown): value is string => typeof value === "string" && value.length === 43 && /^[A-Za-z0-9_-]+$/.test(value);
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 type User = { id: string; name: string; email: string };
 type BrowserSession = { user: User; session: { id: string } };
@@ -19,7 +19,7 @@ const invalidCode = () => new AuthError("sign-in expired. return to freewrite an
 export function iosAuthorization(value: Record<string, unknown>) {
   if (Object.keys(value).some(key => !["code_challenge", "state"].includes(key))) return null;
   const { code_challenge, state } = value;
-  return typeof code_challenge === "string" && opaque.test(code_challenge) && typeof state === "string" && opaque.test(state)
+  return opaque(code_challenge) && opaque(state)
     ? { code_challenge, state } : null;
 }
 
@@ -86,7 +86,7 @@ export function createIOSAuth(pool: Pool, sessionFor: (request: Request) => Prom
     async exchange(request: Request) {
       nativeRequest(request);
       const values = await body(request);
-      if (Object.keys(values).length !== 2 || typeof values.code !== "string" || !opaque.test(values.code) || typeof values.code_verifier !== "string" || !/^[A-Za-z0-9._~-]{43,128}$/.test(values.code_verifier)) throw invalidCode();
+      if (Object.keys(values).length !== 2 || !opaque(values.code) || typeof values.code_verifier !== "string" || (values.code_verifier.length < 43 || values.code_verifier.length > 128 || /[^A-Za-z0-9._~-]/.test(values.code_verifier))) throw invalidCode();
       const challenge = createHash("sha256").update(values.code_verifier).digest("base64url");
       const client = await pool.connect();
       try {
@@ -94,7 +94,7 @@ export function createIOSAuth(pool: Pool, sessionFor: (request: Request) => Prom
         const { rows } = await client.query<{ id: string; value: string }>(`select id,value from "verification" where identifier=$1 and "expiresAt">now() for update`, [`freewrite-ios:${digest(values.code)}`]);
         if (rows.length !== 1) throw invalidCode();
         const grant = JSON.parse(rows[0].value) as Record<string, unknown>;
-        if (typeof grant.challenge !== "string" || !opaque.test(grant.challenge) || typeof grant.userId !== "string" || typeof grant.sessionId !== "string" || !timingSafeEqual(Buffer.from(grant.challenge), Buffer.from(challenge))) throw invalidCode();
+        if (!opaque(grant.challenge) || typeof grant.userId !== "string" || typeof grant.sessionId !== "string" || !timingSafeEqual(Buffer.from(grant.challenge), Buffer.from(challenge))) throw invalidCode();
         const user = (await client.query<User>(`select u.id,u.name,u.email from "user" u join "session" s on s."userId"=u.id where u.id=$1 and s.id=$2 and s."expiresAt">now()`, [grant.userId, grant.sessionId])).rows[0];
         if (!user) throw invalidCode();
         const token = `freewrite_${randomBytes(32).toString("base64url")}`;

@@ -38,7 +38,7 @@ struct FreewriteSignInRequest: Sendable {
               items.filter({ $0.name == "state" }).count == 1,
               items.filter({ $0.name == "code" }).count == 1,
               items.first(where: { $0.name == "state" })?.value == state,
-              let code = items.first(where: { $0.name == "code" })?.value,
+              let code = items.first(where: { $0.name == "code" })?.value, code.utf8.count == 43,
               code.range(of: "^[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil else { throw SignInError.invalidCallback }
         return code
     }
@@ -103,7 +103,7 @@ struct FreewriteAccountClient: Sendable {
     static func valid(_ login: FreewriteLogin) -> Bool {
         let format = ISO8601DateFormatter()
         format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return login.token.range(of: "^freewrite_[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil && valid(login.user)
+        return login.token.utf8.count == 53 && login.token.range(of: "^freewrite_[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil && valid(login.user)
             && login.expiresAt.count <= 64 && format.date(from: login.expiresAt) != nil
     }
     private static func valid(_ user: FreewriteUser) -> Bool {
