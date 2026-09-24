@@ -1,0 +1,46 @@
+name: iPhone build and tests
+on:
+  pull_request:
+    paths: ["apps/ios/**", ".github/workflows/ios.yml"]
+  push:
+    branches: [main]
+    paths: ["apps/ios/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+defaults:
+  run:
+    working-directory: apps/ios
+permissions:
+  contents: read
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  core:
+    runs-on: macos-26
+    timeout-minutes: 10
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v7
+      - name: Core unit tests on macOS
+        run: swift test
+  ios:
+    runs-on: macos-26
+    timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify generated Xcode project
+        run: |
+          python3 scripts/generate-project.py
+          git diff --exit-code -- Freewrite.xcodeproj
+      - name: Build simulator and device, test on iPhone simulator
+        run: scripts/test-ios.sh
+      - name: Test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-test-results
+          path: apps/ios/TestResults-*.xcresult
+          if-no-files-found: ignore
