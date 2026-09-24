@@ -4,10 +4,13 @@ import SwiftData
 @main struct FreewriteApp: App {
     @State private var model: WriterModel?
     @State private var loadError = false
+    @State private var account = AccountModel(credentials: AccountCredentialStore(),
+                                             client: FreewriteAccountClient(transport: AccountURLSessionTransport()),
+                                             browser: BrowserSignIn())
     var body: some Scene {
         WindowGroup {
             Group {
-                if let model { WriteView(model: model) }
+                if let model { WriteView(model: model).environment(account) }
                 else {
                     VStack(spacing: 20) {
                         Text(loadError ? "your entries couldn’t be opened." : "opening freewrite…")

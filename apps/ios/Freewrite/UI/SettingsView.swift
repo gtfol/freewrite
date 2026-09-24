@@ -2,12 +2,18 @@ import SwiftUI
 
 struct SettingsView: View {
     var model: WriterModel
+    @Environment(AccountModel.self) private var account
+    @State private var deletingUserID: String?
+    @State private var deleteConfirmation = ""
+    @State private var showDelete = false
 
     var body: some View {
         VStack(spacing: 0) {
             SheetHeader(title: "settings")
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    accountSection
+                    Rectangle().fill(FreewriteStyle.divider).frame(height: 0.5)
                     HStack(spacing: 0) {
                         Text("lock backspace")
                         InfoButton(title: "lock backspace", paragraphs: [
@@ -39,5 +45,50 @@ struct SettingsView: View {
                 }.padding(20)
             }
         }.freewriteScreen()
+            .task { await account.refresh() }
+            .alert("delete your freewrite account?", isPresented: $showDelete) {
+                TextField("type DELETE", text: $deleteConfirmation)
+                    .textInputAutocapitalization(.characters).autocorrectionDisabled()
+                Button("cancel", role: .cancel) { deletingUserID = nil; deleteConfirmation = "" }
+                Button("delete account", role: .destructive) {
+                    if let id = deletingUserID { Task { await account.deleteAccount(expectedUserID: id) } }
+                    deletingUserID = nil; deleteConfirmation = ""
+                }.disabled(deleteConfirmation != "DELETE" || account.busy)
+            } message: {
+                Text("this permanently deletes your web account and its synced writing, articles, and drawings. entries saved only on this iPhone remain. this cannot be undone.")
+            }
+    }
+
+    private var accountSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
+                Text("account")
+                InfoButton(title: "account", paragraphs: [
+                    "use the same account as freewrite on the web. your sign-in is stored securely on this iPhone.",
+                    "this test build supports signing in and out. entries still stay on this iPhone; cloud sync is coming next."
+                ])
+                Spacer()
+                if account.busy { ProgressView().controlSize(.small) }
+            }
+            if let login = account.login {
+                Text(login.user.name.isEmpty ? login.user.email : login.user.name).padding(.top, 4)
+                Text(login.user.email).font(FreewriteStyle.caption).foregroundStyle(FreewriteStyle.secondary).textSelection(.enabled)
+                Link("open freewrite", destination: URL(string: "https://freewrite.gtfol.dev")!).frame(minHeight: 44)
+                Button("sign out") { Task { await account.signOut() } }.frame(minHeight: 44).disabled(account.busy)
+                Button("delete account", role: .destructive) {
+                    deletingUserID = login.user.id; deleteConfirmation = ""; showDelete = true
+                }.frame(minHeight: 44).disabled(account.busy)
+            } else {
+                Button(account.busy ? "signing in…" : "sign in to freewrite") {
+                    model.background()
+                    guard model.flush() else { return }
+                    Task { await account.signIn() }
+                }.frame(minHeight: 44).disabled(account.busy)
+                Link("open freewrite", destination: URL(string: "https://freewrite.gtfol.dev")!).frame(minHeight: 44)
+            }
+            if let error = account.error {
+                Text(error).font(FreewriteStyle.caption).fixedSize(horizontal: false, vertical: true).padding(.top, 8)
+            }
+        }
     }
 }
