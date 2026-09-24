@@ -1,0 +1,23 @@
+apps/ios/README.md
+  s_ed36ef5ee1b507::t_06a3027b146c0c 19
+apps/web/app/ios/privacy/page.tsx
+  s_ed36ef5ee1b507::t_c116cf2c5ff3b0 37
+apps/web/next.config.ts
+  s_ed36ef5ee1b507::t_c0e851a5344de9 4-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9b8ea703eb17d37a7c18bae9843b0cf86ffd5c56",
+  "prompts": {},
+  "sessions": {
+    "s_ed36ef5ee1b507": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d08a-bb45-7cc2-b052-ae3dfead9767",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
