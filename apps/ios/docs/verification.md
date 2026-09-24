@@ -50,3 +50,12 @@ The simulator checks verify the editor, persistence, and error presentation. The
 ## Future reader behavior
 
 The reader is outside this write-and-dictate slice. When it reaches iOS, imported content must support direct text editing and trimming within paragraphs, with undo, cancel, and restoration of the original import, matching the separate web reader edit PR. Writing-only slash commands are excluded.
+
+## Account login test build, September 24
+
+Build 5 adds system-browser sign-in with the same web account, secure device-only Keychain storage, sign-out with server revocation, and typed confirmation for account deletion. Entries remain local; account sign-in does not yet enable entry sync.
+
+- 28 core tests pass, including PKCE's RFC challenge vector, strict callback validation, cancellation, credential-storage failure, offline sign-out retry, session expiration, and matching the deletion confirmation to the account.
+- 35 iOS simulator tests pass, including a real Keychain credential round trip and removal with a unique test service. Debug simulator and Release device builds pass.
+- 240 web tests pass, with one existing optional database test skipped. Native account tests cover origin checks, account mismatch, incorrect PKCE proof, authorization-code replay, revoked browser sessions, expired native sessions, session-specific revocation, deletion confirmation, and request size limits. Web lint, type checking, and production build pass.
+- The signed Release archive succeeds. Upload was attempted but Xcode could not read the Apple account credential while the Mac was locked. TestFlight distribution, visual review, and a real browser sign-in on an iPhone remain pending; automated checks do not establish those results.

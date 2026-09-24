@@ -12,7 +12,7 @@ import UIKit
         anchor = window
         return try await withCheckedThrowingContinuation { continuation in
             pending = continuation
-            let session = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme) { [weak self] callback, error in
+            let session = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme) { @Sendable [weak self] callback, error in
                 Task { @MainActor in
                     if let callback { self?.finish(.success(callback)) }
                     else if (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin { self?.finish(.failure(SignInError.cancelled)) }
