@@ -16,7 +16,7 @@ With the gtfol Apple account signed in to Xcode, `scripts/archive-ios.sh` create
 
 Create the matching App Store Connect record before uploading. Before each new uploaded build, increment `CURRENT_PROJECT_VERSION` in `scripts/generate-project.py` and regenerate the committed project. The script does not silently change version numbers. Apple may take time to process uploads before testers can install them.
 
-The bundled privacy manifest declares app-only UserDefaults access. The encryption declaration covers the app's use of Apple's built-in security and HTTPS APIs. Use `https://gtfol.dev/contact` for the App Store support URL. The iPhone privacy policy is `/ios/privacy` on freewrite.gtfol.dev.
+The bundled privacy manifest declares app-only UserDefaults access and account name, email, and user ID used for app functionality without tracking. The encryption declaration covers the app's use of Apple's built-in security and HTTPS APIs. Use `https://gtfol.dev/contact` for the App Store support URL. The iPhone privacy policy is `/ios/privacy` on freewrite.gtfol.dev.
 
 ## Write and dictate
 
@@ -42,11 +42,13 @@ Cleanup uses conservative English rules: obvious “um”/“uh”/“erm” fil
 
 Short information popovers explain dictation and backspace locking. Dictation and cleanup are entirely on-device; builds 1–2's optional remote cleanup implementation and key entry have been removed. Upgrading deletes that retired Keychain credential.
 
+Settings offers browser sign-in with the existing web account, opening freewrite on the web, sign-out, and confirmed account deletion. This login test build keeps entries local; signing in or out does not upload, reassign, or erase them. Sign-out revokes only this iPhone session. Account deletion removes the web account and its cloud data, with a typed confirmation that explains local writing remains.
+
 Settings links to terms of service, the privacy policy, and “contact us.” “Support freewrite” opens the same Stripe checkout as the web app. This external-payment link is shown only when StoreKit reports the US storefront, following [App Review 3.1.1(a)](https://developer.apple.com/app-store/review/guidelines/#in-app-purchase). Unknown or other storefronts hide the payment link; the contact and legal links remain available.
 
 ## Data and design
 
-SwiftData stores entries locally with the web fields `{id, content, createdAt, updatedAt, deletedAt}`. Dates encode as Unix milliseconds, IDs are strings, and deletion produces a tombstone. CloudKit is disabled. The OS may include local entries in device backups; there is no app-level sign-in or sync.
+SwiftData stores entries locally with the web fields `{id, content, createdAt, updatedAt, deletedAt}`. Dates encode as Unix milliseconds, IDs are strings, and deletion produces a tombstone. CloudKit is disabled. The OS may include local entries in device backups; entry sync is not included yet. Account sign-in uses a separate credential in this device’s Keychain.
 
 The interface follows [gtfol's design standard](https://github.com/gtfol/ai/blob/main/DESIGN.md): system light/dark appearance, white/black canvas, monochrome text and line icons, open space, thin dividers, and a quiet bottom toolbar. [Lato Regular](Freewrite/Resources/Lato-Regular.ttf) is bundled under the [OFL](Freewrite/Resources/Lato-OFL.txt), with Dynamic Type.
 
@@ -67,8 +69,14 @@ The script builds the simulator and unsigned Release device targets, then runs t
 - `FreewriteTests`: core behavior, background audio callbacks, persistence, and retired-credential removal.
 - `scripts/generate-project.py`: standard-library-only generator; commit its `.xcodeproj` output.
 
-Only `Transcriber`, `TextCleaner`, and `EntryStore` are extension seams. Sign-in/sync, reader, sharing, background capture, Siri/Shortcuts, driving mode, and other platforms are outside v1.
+Only `Transcriber`, `TextCleaner`, and `EntryStore` are extension seams. Entry sync, reader, sharing, background capture, Siri/Shortcuts, driving mode, and other platforms are outside v1.
 
 See [verification](docs/verification.md) for simulator results, screenshots, and the physical-iPhone checklist.
 
 References: [Apple speech results](https://developer.apple.com/documentation/speech/speechtranscriber/result), [speech permissions](https://developer.apple.com/documentation/speech/asking-permission-to-use-speech-recognition).
+
+## Account protocol
+
+The app uses ASWebAuthenticationSession with an S256 PKCE challenge and random state. The fixed callback `dev.gtfol.freewrite://auth/callback` carries a single-use, two-minute code, never a session token. The server checks the browser session and explicit account choice before issuing a code; exchange verifies the PKCE proof and original browser session in a database transaction. Only hashes of codes and native bearer tokens are stored. The existing Better Auth verification/session tables and user deletion cascade are reused; this feature needs no schema migration. Native tokens expire after 90 days and are accepted only by `/api/ios/*`, not as website cookies.
+
+The native network client uses an ephemeral session with no cookie or credential storage and rejects redirects. Keychain credentials use `WhenUnlockedThisDeviceOnly`. Cancelling sign-in leaves the writing unchanged. Failed credential storage revokes the newly issued session; failed offline sign-out retains the credential so revocation can be retried.
