@@ -18,12 +18,13 @@ import SwiftData
         }
     }
     @MainActor private func load() {
+        RetiredCleanupKey.remove()
         do {
             let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
                                                        appropriateFor: nil, create: true)
             let configuration = ModelConfiguration(url: support.appendingPathComponent("default.store"), cloudKitDatabase: .none)
             let container = try ModelContainer(for: StoredEntry.self, configurations: configuration)
-            model = WriterModel(store: SwiftDataEntryStore(container: container), transcriber: AppleTranscriber(), cleaner: ConfiguredTextCleaner())
+            model = WriterModel(store: SwiftDataEntryStore(container: container), transcriber: AppleTranscriber())
             loadError = false
         } catch { loadError = true }
     }

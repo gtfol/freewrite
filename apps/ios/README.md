@@ -20,6 +20,8 @@ The bundled privacy manifest declares app-only UserDefaults access. The encrypti
 
 ## Write and dictate
 
+The centered app name is flanked by Settings on the left and writing tools on the right. The tools menu inserts Markdown headings, emphasis, links, lists, checklists, quotes, code blocks, and dividers at the selection. Backspace locking still protects existing text.
+
 The bottom toolbar contains the 15-minute timer, microphone, new entry, and history. Tap the timer to start/pause; long-press it to reset. It uses a deadline so elapsed time stays correct when the app is inactive. Finishing resets the timer, as on web, and keeps the text. Backspace locking is optional and off by default, matching web; enable it in Settings. Typed text has autocorrection and spellcheck disabled.
 
 Tap the microphone to start. Live interim words appear at the cursor and are revised in place until Apple finalizes them. Tap again to stop and clean up that dictated passage. **undo cleanup** (or the editor's native undo) restores the exact raw transcript in one action, including when backspace is locked. Selecting existing text before dictation inserts after the selection without deleting it.
@@ -34,15 +36,13 @@ The app uses **SpeechAnalyzer + SpeechTranscriber**, fed with in-memory AVAudioE
 
 Microphone permission is requested when dictation is first used. Apple's separate server-based speech permission does not apply to this API. Model installation shows progress and can be cancelled; unsupported hardware/language and failed downloads leave typing available. Models need a connection to download but transcription runs on device once available. The system locale selects the speech language.
 
-Default cleanup uses conservative English rules: obvious “um”/“uh”/“erm” fillers, unambiguous filler “like,” capitalization, and punctuation. Meaningful or ambiguous “like” stays. It is deliberately limited, not a semantic rewrite engine. Other languages retain the speech framework's transcript without English cleanup rules.
+Cleanup uses conservative English rules: obvious “um”/“uh”/“erm” fillers, unambiguous filler “like,” capitalization, and punctuation. Meaningful or ambiguous “like” stays. It is deliberately limited, not a semantic rewrite engine. Other languages retain the speech framework's transcript without English cleanup rules.
 
-## Optional OpenAI cleanup
+## Settings
 
-Add your own OpenAI key in Settings and explicitly approve sending dictated text. The key and consent are stored together only in Keychain with `WhenUnlockedThisDeviceOnly`, with Keychain sync disabled. Removing the key disables future requests. No shared or developer credential is bundled.
+Short information popovers explain dictation and backspace locking. Dictation and cleanup are entirely on-device; builds 1–2's optional remote cleanup implementation and key entry have been removed. Upgrading deletes that retired Keychain credential.
 
-English passages use `gpt-4.1-mini` through the Responses API. Only the current dictated text is sent, never audio, other entries, or entry metadata. Requests set `store: false`, use an ephemeral URLSession, reject redirects, and time out. OpenAI usage is billed to your account and provider retention policies still apply. No API calls happen merely from opening Settings or saving a key.
-
-Output must retain all non-filler words in order; added, reordered, or missing words, incomplete responses, and service failures preserve raw text and show a cleanup failure. A network request is never required to save or continue writing.
+Settings links to terms of service, the privacy policy, and “contact us.” “Support freewrite” opens the same Stripe checkout as the web app. This external-payment link is shown only when StoreKit reports the US storefront, following [App Review 3.1.1(a)](https://developer.apple.com/app-store/review/guidelines/#in-app-purchase). Unknown or other storefronts hide the payment link; the contact and legal links remain available.
 
 ## Data and design
 
@@ -61,14 +61,14 @@ scripts/test-ios.sh
 
 The script builds the simulator and unsigned Release device targets, then runs tests with ad-hoc simulator signing so Keychain works. It selects an available iPhone simulator running iOS 26 or newer. Each run writes a unique `TestResults-*.xcresult`. To build from an iCloud/file-provider folder, set `FREEWRITE_DERIVED_DATA` to a local temporary path outside that folder so signing is not affected by Finder metadata.
 
-- `Freewrite/Core`: Entry, speech adapter, cleaner, cursor insertion, writing session, and Keychain.
+- `Freewrite/Core`: Entry, speech adapter, cleaner, cursor insertion, writing session, and retired-credential cleanup.
 - `Freewrite/Persistence`: SwiftData model and explicit-save adapter.
 - `Freewrite/UI`: writing, history, settings, and the UIKit editor bridge.
-- `FreewriteTests`: core behavior, mocked network responses, persistence, and isolated Keychain tests.
+- `FreewriteTests`: core behavior, background audio callbacks, persistence, and retired-credential removal.
 - `scripts/generate-project.py`: standard-library-only generator; commit its `.xcodeproj` output.
 
 Only `Transcriber`, `TextCleaner`, and `EntryStore` are extension seams. Sign-in/sync, reader, sharing, background capture, Siri/Shortcuts, driving mode, and other platforms are outside v1.
 
 See [verification](docs/verification.md) for simulator results, screenshots, and the physical-iPhone checklist.
 
-References: [Apple speech results](https://developer.apple.com/documentation/speech/speechtranscriber/result), [speech permissions](https://developer.apple.com/documentation/speech/asking-permission-to-use-speech-recognition), [OpenAI response storage](https://developers.openai.com/api/docs/guides/migrate-to-responses).
+References: [Apple speech results](https://developer.apple.com/documentation/speech/speechtranscriber/result), [speech permissions](https://developer.apple.com/documentation/speech/asking-permission-to-use-speech-recognition).

@@ -8,13 +8,16 @@ struct WriteView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("freewrite").font(FreewriteStyle.caption).foregroundStyle(FreewriteStyle.secondary)
-                Spacer()
-                Button { settings = true } label: {
-                    Image(systemName: "gearshape").font(.system(size: 17, weight: .regular))
-                        .frame(width: 44, height: 44)
-                }.accessibilityLabel("settings")
+            ZStack {
+                Text("freewrite").font(FreewriteStyle.heading)
+                HStack {
+                    Button { settings = true } label: {
+                        Image(systemName: "gearshape").font(.system(size: 17, weight: .regular))
+                            .frame(width: 44, height: 44)
+                    }.accessibilityLabel("settings")
+                    Spacer()
+                    WritingTools(model: model)
+                }
             }.padding(.horizontal, 20)
             if model.current != nil {
                 ZStack(alignment: .topLeading) {

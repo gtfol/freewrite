@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import Security
 @testable import Freewrite
 
 @MainActor final class PersistenceTests: XCTestCase {
@@ -25,14 +26,21 @@ import SwiftData
         try store.save(deleted); try store.save(original)
         XCTAssertTrue(try store.entries().isEmpty)
     }
-    func testKeychainConsentAndRemoval() throws {
-        let store = KeychainCredentials(service: "dev.gtfol.freewrite.tests.\(UUID())")
-        defer { try? store.remove() }
-        XCTAssertNil(try store.read())
-        XCTAssertThrowsError(try store.save(key: "synthetic-only", consent: false))
-        try store.save(key: "synthetic-only", consent: true)
-        XCTAssertEqual(try store.read()?.key, "synthetic-only")
-        XCTAssertEqual(try store.read()?.consent, true)
-        try store.remove(); XCTAssertNil(try store.read())
+    func testUpgradeRemovesRetiredCleanupCredential() {
+        let service = "dev.gtfol.freewrite.tests.\(UUID())"
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: "openai",
+            kSecAttrSynchronizable as String: false
+        ]
+        defer { SecItemDelete(query as CFDictionary) }
+        let values = query.merging([
+            kSecValueData as String: Data("synthetic-retired-credential".utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]) { _, new in new }
+        XCTAssertEqual(SecItemAdd(values as CFDictionary, nil), errSecSuccess)
+        XCTAssertEqual(RetiredCleanupKey.remove(service: service), errSecSuccess)
+        XCTAssertEqual(SecItemCopyMatching(query as CFDictionary, nil), errSecItemNotFound)
     }
 }

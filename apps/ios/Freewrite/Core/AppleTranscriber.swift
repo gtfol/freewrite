@@ -47,12 +47,9 @@ import Speech
         let speech = SpeechTranscriber(locale: locale, transcriptionOptions: [],
                                        reportingOptions: [.volatileResults], attributeOptions: [])
         do {
-            let reserved = await AssetInventory.reservedLocales
-            if !reserved.contains(locale) {
-                guard try await AssetInventory.reserve(locale: locale) else { throw WritingError.modelDownload }
-                // Keep the app's locale reservation so the on-device model stays cached.
-                try check(id)
-            }
+            // This API reserves locale variants automatically and returns nil
+            // for an installed model. Don't compare locale identities or treat
+            // reserve(locale:)'s "already reserved" false result as a failure.
             if let request = try await AssetInventory.assetInstallationRequest(supporting: [speech]) {
                 try check(id)
                 output?.yield(.downloading(request.progress.fractionCompleted))
@@ -103,7 +100,7 @@ import Speech
         }
         try await analyzer.start(inputSequence: audio)
         try check(id)
-        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: sourceFormat) { buffer, _ in bridge.consume(buffer) }
+        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: sourceFormat, block: bridge.tap)
         hasTap = true
         engine.prepare(); try engine.start()
         observeInterruptions(id: id)
@@ -183,11 +180,19 @@ import Speech
 
 // AVAudioEngine invokes this bridge only on its serial audio-tap callback.
 // Each converted buffer is newly owned by AnalyzerInput and never mutated again.
-private final class AudioBufferBridge: @unchecked Sendable {
+final class AudioBufferBridge: @unchecked Sendable {
     let converter: AVAudioConverter
     let format: AVAudioFormat
     let continuation: AsyncStream<AnalyzerInput>.Continuation
     let failed: @Sendable () -> Void
+
+    // AVAudioNodeTapBlock predates Swift concurrency and isn't annotated
+    // Sendable. Creating its closure inside prepare() inherited MainActor,
+    // which traps when AVAudioEngine delivers the first background callback.
+    // Keep the callback explicitly Sendable and outside the UI actor.
+    var tap: @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void {
+        { @Sendable [self] buffer, _ in consume(buffer) }
+    }
 
     init(from: AVAudioFormat, to: AVAudioFormat, continuation: AsyncStream<AnalyzerInput>.Continuation,
          failed: @escaping @Sendable () -> Void) throws {

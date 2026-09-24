@@ -3,7 +3,11 @@ import Foundation
 protocol TextCleaner: Sendable { func clean(_ text: String) async throws -> String }
 
 struct OnDeviceTextCleaner: TextCleaner {
-    func clean(_ text: String) async throws -> String { Self.cleanLocally(text) }
+    var locale = Locale.current
+    func clean(_ text: String) async throws -> String {
+        guard locale.language.languageCode?.identifier == "en" else { return text }
+        return Self.cleanLocally(text)
+    }
 
     // Deliberately narrow English rules. Ambiguous uses of “like” are kept.
     static func removingFillers(_ text: String) -> String {
@@ -39,7 +43,7 @@ struct OnDeviceTextCleaner: TextCleaner {
             .map { $0.replacingOccurrences(of: "’", with: "'") }
     }
 
-    // Remote output must retain every non-filler word, in its original order.
+    // Cleanup must retain every non-filler word, in its original order.
     static func preservesWords(raw: String, cleaned: String) -> Bool {
         words(removingFillers(raw)) == words(cleaned)
     }
