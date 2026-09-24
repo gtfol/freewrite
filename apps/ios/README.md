@@ -16,7 +16,7 @@ With the gtfol Apple account signed in to Xcode, `scripts/archive-ios.sh` create
 
 Create the matching App Store Connect record before uploading. Before each new uploaded build, increment `CURRENT_PROJECT_VERSION` in `scripts/generate-project.py` and regenerate the committed project. The script does not silently change version numbers. Apple may take time to process uploads before testers can install them.
 
-The bundled privacy manifest declares app-only UserDefaults access. The encryption declaration covers the app's use of Apple's built-in security and HTTPS APIs. Public iPhone help and privacy pages are `/ios/support` and `/ios/privacy` on freewrite.gtfol.dev.
+The bundled privacy manifest declares app-only UserDefaults access. The encryption declaration covers the app's use of Apple's built-in security and HTTPS APIs. Use `https://gtfol.dev/contact` for the App Store support URL. The iPhone privacy policy is `/ios/privacy` on freewrite.gtfol.dev.
 
 ## Write and dictate
 

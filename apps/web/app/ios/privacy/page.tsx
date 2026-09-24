@@ -34,7 +34,7 @@ export default function IOSPrivacyPage() {
           <p>freewrite is operated by gtfol, LLC. For privacy questions, <a className="underline underline-offset-4" href="https://gtfol.dev/contact">contact gtfol</a>. Please avoid including private writing or API keys in support requests.</p>
         </section>
       </div>
-      <Link href="/ios/support" className="mt-10 inline-block underline underline-offset-4">iPhone support</Link>
+      <a href="https://gtfol.dev/contact" className="mt-10 inline-block underline underline-offset-4">contact us</a>
     </main>
   );
 }
