@@ -1,0 +1,21 @@
+apps/ios/docs/verification.md
+  s_ed36ef5ee1b507::t_846645d125383e 53-61
+apps/ios/Freewrite/UI/BrowserSignIn.swift
+  s_ed36ef5ee1b507::t_846645d125383e 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5d058334481807600d8fb6235f95533869c88bcd",
+  "prompts": {},
+  "sessions": {
+    "s_ed36ef5ee1b507": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d08a-bb45-7cc2-b052-ae3dfead9767",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Allen Lin <allenlinsh@gmail.com>"
+    }
+  }
+}
