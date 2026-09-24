@@ -9,6 +9,7 @@
   <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
   <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
   <key>LSRequiresIPhoneOS</key><true/>
+  <key>ITSAppUsesNonExemptEncryption</key><false/>
   <key>NSMicrophoneUsageDescription</key><string>freewrite uses the microphone to turn your speech into text on this iPhone. Audio is never saved or uploaded.</string>
   <key>UIAppFonts</key><array><string>Lato-Regular.ttf</string></array>
   <key>UILaunchScreen</key><dict/>

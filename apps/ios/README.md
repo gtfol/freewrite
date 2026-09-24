@@ -2,13 +2,21 @@
 
 write for 15 minutes. don't stop. don't edit. now you can talk, too.
 
-Native SwiftUI + SwiftData, iOS 26+, iPhone only. No third-party dependencies, analytics, bundled credentials, or background recording. The bundle ID is the placeholder `dev.gtfol.freewrite`; choose your signing team and final identifier before device distribution.
+Native SwiftUI + SwiftData, iOS 26+, iPhone only. No third-party dependencies, analytics, bundled credentials, or background recording. The bundle ID is `dev.gtfol.freewrite`, registered to gtfol, LLC (team `J59ZSG67SJ`).
 
 ## Build and run
 
 Open `Freewrite.xcodeproj` in Xcode 26.6 or newer and select the **Freewrite** scheme and an iPhone simulator. The complete project is committed; no generation step or package installation is needed to build.
 
-For device use, select your development team in Signing & Capabilities. Both SpeechAnalyzer and SpeechTranscriber require iOS 26. Check a physical device for speech-model support; a compatible OS alone does not guarantee supported hardware or language.
+Device signing uses the gtfol, LLC team. Contributors can override the development team locally when building. Both SpeechAnalyzer and SpeechTranscriber require iOS 26. Check a physical device for speech-model support; a compatible OS alone does not guarantee supported hardware or language.
+
+## TestFlight
+
+With the gtfol Apple account signed in to Xcode, `scripts/archive-ios.sh` creates a signed Release archive in a temporary directory. `scripts/archive-ios.sh --upload` also uploads it for **internal TestFlight testing only**; it cannot publish to the App Store or external testers. `FREEWRITE_RELEASE_DIR` changes the output directory, and `FREEWRITE_TEAM_ID` overrides signing.
+
+Create the matching App Store Connect record before uploading. Before each new uploaded build, increment `CURRENT_PROJECT_VERSION` in `scripts/generate-project.py` and regenerate the committed project. The script does not silently change version numbers. Apple may take time to process uploads before testers can install them.
+
+The bundled privacy manifest declares app-only UserDefaults access. The encryption declaration covers the app's use of Apple's built-in security and HTTPS APIs. Public iPhone help and privacy pages are `/ios/support` and `/ios/privacy` on freewrite.gtfol.dev.
 
 ## Write and dictate
 
