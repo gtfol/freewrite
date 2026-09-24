@@ -74,7 +74,7 @@ export interface Article {
   savedAt: number;
   readAt: number | null;
   via: ArticleVia;
-  // Set on first trim; content as it was before any blocks were removed.
+  // Set on first edit; byte-identical content from before any edits/trimming.
   contentOriginal?: string;
   // Absent when the article has no annotations — never an empty array.
   highlights?: Highlight[];

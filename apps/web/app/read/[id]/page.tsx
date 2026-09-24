@@ -16,6 +16,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { ArticleEditor, type ArticleEditorHandle } from "@/components/article-editor";
+import { sanitizeContent } from "@/lib/article-html";
 import { ArticleTitle } from "@/components/article-title";
 import { Audiobook } from "@/components/audiobook";
 import { HighlightLayer } from "@/components/highlight-layer";
@@ -24,20 +26,17 @@ import {
   articleSite,
   htmlWordCount,
   readingTime,
-  splitBlocks,
   viaLabel,
 } from "@/lib/articles";
-import { deleteArticle, getArticle, putArticle } from "@/lib/db";
+import { deleteArticle, getArticle, putArticle, saveArticleContent } from "@/lib/db";
 import { SYNC_APPLIED_EVENT } from "@/lib/sync";
 import { useArticleOriginal } from "@/hooks/use-article-original";
 import type { Article, Highlight } from "@/lib/types";
 
-interface TrimSession {
-  blocks: string[];
-  undo: string[][];
-  // The session's starting blocks, joined — stored as contentOriginal on the
-  // first trim so a later Restore round-trips to byte-identical content.
+interface EditSession {
   original: string;
+  changed: boolean;
+  canUndo: boolean;
 }
 
 export default function ArticlePage({
@@ -50,14 +49,17 @@ export default function ArticlePage({
   const [article, setArticle] = useState<Article | null | undefined>(undefined);
   const originalUrl = useArticleOriginal(article);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [trim, setTrim] = useState<TrimSession | null>(null);
+  const [edit, setEdit] = useState<EditSession | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const editorRef = useRef<ArticleEditorHandle>(null);
   // Mounting the transport is what loads the model and starts synthesis, so
   // an article nobody asks to hear costs nothing.
   const [listening, setListening] = useState(false);
   const bodyRef = useRef<HTMLElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
-  const trimActive = trim !== null;
+  const editActive = edit !== null;
 
   useEffect(() => {
     void getArticle(id).then((found) => {
@@ -70,10 +72,10 @@ export default function ArticlePage({
   }, [id]);
 
   // Highlights (or the article itself) may change on another device while
-  // this one is open — pick up synced state, but never under an open trim
-  // session, whose Done would overwrite it with stale content.
+  // this one is open. Keep an open editor stable; Done checks the latest body
+  // inside its save transaction and refuses conflicting content changes.
   useEffect(() => {
-    if (trimActive) return;
+    if (editActive) return;
     const refresh = () => {
       void getArticle(id).then((found) => {
         if (found) setArticle(found);
@@ -81,15 +83,14 @@ export default function ArticlePage({
     };
     window.addEventListener(SYNC_APPLIED_EVENT, refresh);
     return () => window.removeEventListener(SYNC_APPLIED_EVENT, refresh);
-  }, [id, trimActive]);
+  }, [id, editActive]);
 
   // TeX arrives stored as <span class="math">…</span>; render it with KaTeX
   // after the HTML is in the DOM. KaTeX only loads for articles that have
-  // math, and re-runs when trim rebuilds the blocks.
+  // math. Leave TeX source editable; never put rendered KaTeX into saved HTML.
   const hasMath = !!article?.content.includes('class="math');
-  const trimBlocks = trim?.blocks;
   useEffect(() => {
-    if (!hasMath) return;
+    if (!hasMath || editActive) return;
     let cancelled = false;
     void import("katex").then(({ default: katex }) => {
       if (cancelled || !bodyRef.current) return;
@@ -105,7 +106,14 @@ export default function ArticlePage({
     return () => {
       cancelled = true;
     };
-  }, [hasMath, article?.content, trimBlocks]);
+  }, [hasMath, article?.content, editActive]);
+
+  useEffect(() => {
+    if (!edit?.changed) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [edit?.changed]);
 
   if (article === undefined) return <main className="min-h-dvh" />;
 
@@ -136,18 +144,6 @@ export default function ArticlePage({
     .filter(Boolean)
     .join(" · ");
 
-  const removeBlock = (index: number) => {
-    setTrim((session) =>
-      session
-        ? {
-            ...session,
-            blocks: session.blocks.filter((_, i) => i !== index),
-            undo: [...session.undo, session.blocks],
-          }
-        : session
-    );
-  };
-
   const rename = (title: string) => {
     const updated: Article = { ...article, title, updatedAt: Date.now() };
     void putArticle(updated);
@@ -164,68 +160,56 @@ export default function ArticlePage({
     setArticle(updated);
   };
 
-  const finishTrim = async () => {
-    if (!trim) return;
-    const content = trim.blocks.join("\n");
-    if (content !== article.content) {
-      const updated: Article = {
-        ...article,
-        content,
-        wordCount: htmlWordCount(content),
-        contentOriginal: article.contentOriginal ?? trim.original,
-      };
-      await putArticle(updated);
-      setArticle(updated);
+  const finishEdit = async () => {
+    if (!edit || !editorRef.current || saving) return;
+    const draft = editorRef.current.content();
+    const content = draft === edit.original || draft === article.contentOriginal
+      ? draft : sanitizeContent(draft, article.url);
+    if (content.length > 2_000_000) {
+      setEditError("This article is too large to save. Shorten it and try again.");
+      return;
     }
-    setTrim(null);
+    setSaving(true); setEditError(null);
+    try {
+      const updated = await saveArticleContent(article.id, edit.original, content, htmlWordCount(content));
+      setArticle(updated); setEdit(null);
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : "Couldn't save this edit. Your text is still here; try again.");
+    } finally { setSaving(false); }
   };
 
-  const trimControls = {
-    active: trim !== null,
-    canUndo: (trim?.undo.length ?? 0) > 0,
-    canRestore:
-      !!article.contentOriginal && article.contentOriginal !== article.content,
+  const editControls = {
+    active: edit !== null,
+    saving,
+    canUndo: edit?.canUndo ?? false,
+    canRestore: !!edit && (edit.changed || article.contentOriginal !== undefined && article.contentOriginal !== edit.original),
     onStart: () => {
-      const blocks = splitBlocks(article.content);
-      setTrim({ blocks, undo: [], original: blocks.join("\n") });
+      setListening(false); setEditError(null);
+      setEdit({ original: article.content, changed: false, canUndo: false });
     },
-    onDone: () => void finishTrim(),
-    onUndo: () =>
-      setTrim((session) =>
-        session && session.undo.length > 0
-          ? {
-              ...session,
-              blocks: session.undo[session.undo.length - 1],
-              undo: session.undo.slice(0, -1),
-            }
-          : session
-      ),
-    onRestore: () =>
-      setTrim((session) =>
-        session && article.contentOriginal
-          ? {
-              ...session,
-              blocks: splitBlocks(article.contentOriginal),
-              undo: [...session.undo, session.blocks],
-            }
-          : session
-      ),
-    onCancel: () => setTrim(null),
+    onDone: () => void finishEdit(),
+    onUndo: () => editorRef.current?.undo(),
+    onRestore: () => editorRef.current?.restore(article.contentOriginal ?? edit!.original),
+    onCancel: () => {
+      setEdit(null); setEditError(null);
+      void getArticle(id).then((found) => setArticle(found ?? null));
+    },
   };
 
   return (
     <main className="min-h-dvh">
       <div ref={wrapRef} className="relative mx-auto max-w-[650px] px-6 pt-14 pb-32">
-        {trim && (
+        {edit && (
           <p className="mb-8 font-sans text-xs text-muted-foreground">
-            Trimming — click a block to remove it. Nothing is saved until Done.
+            Edit any text, or select and delete what you don’t need. Nothing is saved until Done.
           </p>
         )}
         <article
           ref={bodyRef}
           style={{ fontFamily: "var(--font-crimson), Georgia, serif" }}
         >
-          <ArticleTitle title={article.title} onRename={rename} />
+          {edit ? <h1 className="text-3xl leading-tight">{article.title}</h1>
+            : <ArticleTitle title={article.title} onRename={rename} />}
           <p className="mt-3 font-sans text-xs text-muted-foreground">
             {meta}
             {meta && originalUrl && " · "}
@@ -238,27 +222,9 @@ export default function ArticlePage({
               original
             </a>}
           </p>
-          {trim ? (
-            <div className="reader mt-10 select-none">
-              {trim.blocks.map((block, i) => (
-                <div
-                  key={`${i}-${block.length}`}
-                  onClickCapture={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    removeBlock(i);
-                  }}
-                  title="Click to remove"
-                  className="-mx-2 cursor-pointer rounded-sm px-2 transition-colors hover:bg-destructive/10"
-                  dangerouslySetInnerHTML={{ __html: block }}
-                />
-              ))}
-              {trim.blocks.length === 0 && (
-                <p className="font-sans text-sm text-muted-foreground">
-                  Nothing left — Undo, or Cancel to keep the article as it was.
-                </p>
-              )}
-            </div>
+          {edit ? (
+            <ArticleEditor initial={edit.original} editorRef={editorRef} disabled={saving}
+              onChange={(state) => setEdit((current) => current ? { ...current, ...state } : current)} />
           ) : (
             <div
               ref={contentRef}
@@ -267,7 +233,7 @@ export default function ArticlePage({
             />
           )}
         </article>
-        {!trim && (
+        {!edit && (
           <HighlightLayer
             article={article}
             contentRef={contentRef}
@@ -281,13 +247,13 @@ export default function ArticlePage({
         article={article}
         originalUrl={originalUrl}
         onDelete={() => setConfirmingDelete(true)}
-        trim={trimControls}
+        edit={editControls}
         listen={{
           active: listening,
           onToggle: () => setListening((on) => !on),
         }}
-        banner={
-          listening && !trim ? (
+        banner={editError ? <p role="alert" className="mx-auto max-w-[650px] px-6 pt-4 text-sm text-muted-foreground">{editError}</p> :
+          listening && !edit ? (
             <Audiobook
               article={article}
               contentRef={contentRef}

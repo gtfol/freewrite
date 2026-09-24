@@ -136,8 +136,9 @@ function ArticleChatPopover({ article }: { article: Article }) {
   );
 }
 
-export interface TrimControls {
+export interface EditControls {
   active: boolean;
+  saving: boolean;
   canUndo: boolean;
   canRestore: boolean;
   onStart: () => void;
@@ -156,14 +157,14 @@ export function ReaderNav({
   article,
   originalUrl,
   onDelete,
-  trim,
+  edit,
   listen,
   banner,
 }: {
   article?: Article;
   originalUrl?: string | null;
   onDelete?: () => void;
-  trim?: TrimControls;
+  edit?: EditControls;
   listen?: ListenControls;
   // Rendered inside the nav, above the links — the audiobook transport and
   // the storage line sit here so nothing fights over the bottom of the screen.
@@ -175,36 +176,38 @@ export function ReaderNav({
   // open generator that rewrites its manifest on dispose, which would put back
   // an audiobook the panel had just deleted.
 
-  if (trim?.active) {
+  if (edit?.active) {
     return (
-      <nav className="fixed inset-x-0 bottom-0 z-40 bg-background">
+      <nav className="fixed inset-x-0 bottom-0 z-40 bg-background" onMouseDown={(event) => event.preventDefault()}>
+        {banner}
         <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-6 py-4 text-[13px]">
           <button
             type="button"
-            onClick={trim.onDone}
+            onClick={edit.onDone}
+            disabled={edit.saving}
             className="text-foreground transition-colors hover:opacity-70"
           >
-            Done
+            {edit.saving ? "Saving…" : "Done"}
           </button>
           <Dot />
           <button
             type="button"
-            onClick={trim.onUndo}
-            disabled={!trim.canUndo}
+            onClick={edit.onUndo}
+            disabled={!edit.canUndo || edit.saving}
             className={`${itemClass} disabled:opacity-40`}
           >
             Undo
           </button>
-          {trim.canRestore && (
+          {edit.canRestore && (
             <>
               <Dot />
-              <button type="button" onClick={trim.onRestore} className={itemClass}>
+              <button type="button" onClick={edit.onRestore} disabled={edit.saving} className={itemClass}>
                 Restore original
               </button>
             </>
           )}
           <Dot />
-          <button type="button" onClick={trim.onCancel} className={itemClass}>
+          <button type="button" onClick={edit.onCancel} disabled={edit.saving} className={itemClass}>
             Cancel
           </button>
         </div>
@@ -246,11 +249,11 @@ export function ReaderNav({
               Original
             </a>
             </>}
-            {trim && (
+            {edit && (
               <>
                 <Dot />
-                <button type="button" onClick={trim.onStart} className={itemClass}>
-                  Trim
+                <button type="button" onClick={edit.onStart} className={itemClass}>
+                  Edit
                 </button>
               </>
             )}
