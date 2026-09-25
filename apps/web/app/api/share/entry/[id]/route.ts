@@ -39,6 +39,13 @@ function mutationError(result: Exclude<EntryShareMutation, "ok">) {
     : NextResponse.json({ error: "Not allowed" }, { status: 403 });
 }
 
+// Clients get a generic message; the store's reason goes to the server log so a
+// 502 can be traced to the command the store rejected.
+function storeFailure(message: string, error: unknown) {
+  console.error(`${message}:`, error);
+  return NextResponse.json({ error: message }, { status: 502 });
+}
+
 function tokenFrom(request: Request): string | null {
   const token = request.headers.get(TOKEN_HEADER) ?? "";
   return TOKEN_PATTERN.test(token) ? token : null;
@@ -91,11 +98,8 @@ export async function PUT(
     const { result, expiresAt } = await updateEntryShare(id, token, snapshot, expiry);
     if (result !== "ok") return mutationError(result);
     return NextResponse.json({ expiresAt }, { headers: { "cache-control": "no-store" } });
-  } catch {
-    return NextResponse.json(
-      { error: "Couldn't update the share link" },
-      { status: 502 }
-    );
+  } catch (error) {
+    return storeFailure("Couldn't update the share link", error);
   }
 }
 
@@ -116,11 +120,8 @@ export async function DELETE(
     const result = await deleteEntryShare(id, token, ip);
     if (result !== "ok") return mutationError(result);
     return NextResponse.json({ ok: true });
-  } catch {
-    return NextResponse.json(
-      { error: "Couldn't delete the share link" },
-      { status: 502 }
-    );
+  } catch (error) {
+    return storeFailure("Couldn't delete the share link", error);
   }
 }
 
@@ -151,8 +152,8 @@ export async function PATCH(
     const { result, expiresAt } = await changeEntryShareExpiry(id, token, expiry);
     if (result !== "ok") return mutationError(result);
     return NextResponse.json({ expiresAt }, { headers: { "cache-control": "no-store" } });
-  } catch {
-    return NextResponse.json({ error: "Couldn't change the link expiry" }, { status: 502 });
+  } catch (error) {
+    return storeFailure("Couldn't change the link expiry", error);
   }
 }
 
@@ -166,7 +167,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const { result, expiresAt } = await getEntryShareStatus(id, token);
     if (result !== "ok") return mutationError(result);
     return NextResponse.json({ expiresAt }, { headers: { "cache-control": "no-store" } });
-  } catch {
-    return NextResponse.json({ error: "Couldn't check the link" }, { status: 502 });
+  } catch (error) {
+    return storeFailure("Couldn't check the link", error);
   }
 }
