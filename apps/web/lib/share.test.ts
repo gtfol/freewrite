@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { after, before, test } from "node:test";
+import { after, before, mock, test } from "node:test";
 import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
+import { register } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
@@ -18,6 +20,15 @@ import {
 } from "./share.ts";
 import { entryShareTtlSeconds, parseEntryShareExpiry } from "./share-expiry.ts";
 import { blankSketch } from "./sketch.ts";
+
+// The link-control route handlers import "@/…" and "next/server"; resolve them
+// the way Next does so tests can send the browser's requests to the handlers.
+register("data:text/javascript," + encodeURIComponent(`
+export function resolve(specifier, context, next) {
+  if (specifier === "next/server") return next("next/server.js", context);
+  if (specifier.startsWith("@/")) return next(new URL(specifier.slice(2) + ".ts", ${JSON.stringify(new URL("../", import.meta.url).href)}).href, context);
+  return next(specifier, context);
+}`));
 
 const DAY = 86_400;
 const snapshot: EntryShareSnapshot = {
@@ -47,38 +58,73 @@ const available = spawnSync("redis-server", ["--version"]).status === 0
 const integration = available ? test : test.skip;
 let directory: string;
 let socket: string;
-let server: ChildProcess;
+let replicaSocket: string;
+let servers: ChildProcess[] = [];
 let beforeEval: (() => void) | null = null;
+// Deployed-store (Upstash REST) rules that plain local Redis doesn't enforce:
+// rejected commands answer HTTP 400 with {error}; scripts must be deterministic,
+// taking values from KEYS, ARGV or data they read rather than the clock, so a
+// TIME call fails the script here; and plain reads may be served by a replica
+// that hasn't received recent writes, while scripts run on the primary. While
+// laggingReplica is set, plain GETs see such a replica.
+let laggingReplica = false;
+let storeError: string | null = null;
+const DETERMINISTIC_SCRIPT = `local store = redis
+local function deterministic(command)
+  if string.upper(command) == 'TIME' then error('scripts must not read the store clock') end
+end
+local redis = setmetatable({
+  call = function(command, ...) deterministic(command) return store.call(command, ...) end,
+  pcall = function(command, ...) deterministic(command) return store.pcall(command, ...) end,
+}, { __index = store })
+`;
 const originalFetch = globalThis.fetch;
 const originalUrl = process.env.KV_REST_API_URL;
 const originalToken = process.env.KV_REST_API_TOKEN;
+function reply(parts: (string | number)[], target = socket): { result: unknown } | { error: string } {
+  const output = execFileSync("redis-cli", ["-s", target, "--json", ...parts.map(String)], { encoding: "utf8" }).trim();
+  // redis-cli prints error replies as `error:"…"` rather than JSON.
+  return output.startsWith("error:") ? { error: JSON.parse(output.slice(6)) } : { result: JSON.parse(output) };
+}
 function command(parts: (string | number)[]): unknown {
-  return JSON.parse(execFileSync("redis-cli", ["-s", socket, "--json", ...parts.map(String)], { encoding: "utf8" }));
+  const answer = reply(parts);
+  if ("error" in answer) throw new Error(answer.error);
+  return answer.result;
 }
 function stored(id: string): Record<string, unknown> {
   return JSON.parse(command(["GET", `share:entry:${id}`]) as string);
+}
+async function startRedis(path: string): Promise<void> {
+  servers.push(spawn("redis-server", ["--port", "0", "--unixsocket", path, "--save", "", "--appendonly", "no"], { stdio: "ignore" }));
+  for (let count = 0; count < 100; count++) {
+    const ping = spawnSync("redis-cli", ["-s", path, "PING"], { encoding: "utf8" });
+    if (ping.status === 0) return;
+    await pause(20);
+  }
 }
 before(async () => {
   if (!available) return;
   directory = mkdtempSync(join(tmpdir(), "freewrite-share-test-"));
   socket = join(directory, "redis.sock");
-  server = spawn("redis-server", ["--port", "0", "--unixsocket", socket, "--save", "", "--appendonly", "no"], { stdio: "ignore" });
-  for (let count = 0; count < 100; count++) {
-    const ping = spawnSync("redis-cli", ["-s", socket, "PING"], { encoding: "utf8" });
-    if (ping.status === 0) break;
-    await pause(20);
-  }
+  replicaSocket = join(directory, "replica.sock");
+  await Promise.all([startRedis(socket), startRedis(replicaSocket)]);
   assert.equal(command(["PING"]), "PONG");
+  assert.deepEqual(reply(["PING"], replicaSocket), { result: "PONG" });
   process.env.KV_REST_API_URL = "http://freewrite-redis.invalid";
   process.env.KV_REST_API_TOKEN = "test-only-token";
   globalThis.fetch = async (_url, init) => {
     const parts = JSON.parse(String(init?.body));
-    if (parts[0] === "EVAL" && beforeEval) {
-      const callback = beforeEval;
-      beforeEval = null;
-      callback();
+    if (parts[0] === "EVAL") {
+      if (beforeEval) {
+        const callback = beforeEval;
+        beforeEval = null;
+        callback();
+      }
+      if (storeError) return Response.json({ error: storeError }, { status: 400 });
+      parts[1] = DETERMINISTIC_SCRIPT + parts[1];
     }
-    return Response.json({ result: command(parts) });
+    const answer = reply(parts, parts[0] === "GET" && laggingReplica ? replicaSocket : socket);
+    return Response.json(answer, { status: "error" in answer ? 400 : 200 });
   };
 });
 after(async () => {
@@ -87,11 +133,12 @@ after(async () => {
   else process.env.KV_REST_API_URL = originalUrl;
   if (originalToken === undefined) delete process.env.KV_REST_API_TOKEN;
   else process.env.KV_REST_API_TOKEN = originalToken;
-  if (server) {
+  await Promise.all(servers.map((server) => {
     const done = new Promise((resolve) => server.once("exit", resolve));
     server.kill();
-    await done;
-  }
+    return done;
+  }));
+  servers = [];
   if (directory) rmSync(directory, { recursive: true, force: true });
 });
 
@@ -257,4 +304,101 @@ integration("unknown-id retirement is rate limited without blocking existing-lin
   const link = await putEntryShare(snapshot, "never");
   assert.equal(await deleteEntryShare(link.id, link.token, ip), "ok");
   assert.equal(await deleteEntryShare(link.id, link.token, ip), "missing");
+});
+
+// --- Link-control requests, as the Share popover sends them ---------------
+
+const entryBody = { content: "An entry", fontId: "lato", fontSize: 18, createdAt: 1000 };
+const client = { "content-type": "application/json", "x-forwarded-for": "link-control-test" };
+
+async function createLink(expiresIn: string) {
+  const { POST } = await import("../app/api/share/entry/route.ts");
+  const link = { id: randomBytes(16).toString("base64url"), token: randomBytes(16).toString("base64url") };
+  const response = await POST(new Request("http://share.test/api/share/entry", {
+    method: "POST", headers: client, body: JSON.stringify({ ...entryBody, expiresIn, ...link }),
+  }));
+  assert.equal(response.status, 200);
+  return { link, body: await response.json() };
+}
+
+async function linkRequest(method: "GET" | "PUT" | "PATCH" | "DELETE", link: { id: string; token: string }, body?: unknown) {
+  const handlers = await import("../app/api/share/entry/[id]/route.ts");
+  const request = new Request(`http://share.test/api/share/entry/${link.id}`, {
+    method, headers: { ...client, "x-share-token": link.token },
+    ...(body !== undefined && { body: JSON.stringify(body) }),
+  });
+  const response = await handlers[method](request, { params: Promise.resolve({ id: link.id }) });
+  return { status: response.status, body: await response.json() };
+}
+
+integration("a Never link can be checked, updated, re-timed and revoked under deployed-store rules", async () => {
+  const { link, body } = await createLink("never");
+  assert.deepEqual(body, { ...link, ttlSeconds: null, expiresAt: null });
+  assert.equal(command(["TTL", `share:entry:${link.id}`]), -1);
+
+  // Check link, then again as after a reload: both confirm Never.
+  for (let check = 0; check < 2; check++) {
+    assert.deepEqual(await linkRequest("GET", link), { status: 200, body: { expiresAt: null } });
+  }
+  const shared = await getEntryShare(link.id);
+  assert.equal(shared!.content, entryBody.content);
+  assert.ok(!("token" in shared!));
+
+  assert.deepEqual(await linkRequest("PUT", link, { ...entryBody, content: "Updated" }), { status: 200, body: { expiresAt: null } });
+  assert.equal(command(["TTL", `share:entry:${link.id}`]), -1);
+  assert.equal((await getEntryShare(link.id))!.content, "Updated");
+
+  const timed = await linkRequest("PATCH", link, { expiresIn: "7d" });
+  assert.equal(timed.status, 200);
+  assert.ok(timed.body.expiresAt > Date.now() + 7 * DAY * 1000 - 5000);
+  assert.equal(stored(link.id).expiresAt, timed.body.expiresAt);
+  assert.equal(command(["TTL", `share:entry:${link.id}`]), 7 * DAY);
+  const checked = await linkRequest("GET", link);
+  assert.equal(checked.status, 200);
+  assert.ok(Math.abs(checked.body.expiresAt - timed.body.expiresAt) < 1000);
+
+  assert.deepEqual(await linkRequest("PATCH", link, { expiresIn: "never" }), { status: 200, body: { expiresAt: null } });
+  assert.equal(command(["TTL", `share:entry:${link.id}`]), -1);
+  assert.equal(stored(link.id).expiresAt, null);
+
+  assert.deepEqual(await linkRequest("DELETE", link), { status: 200, body: { ok: true } });
+  assert.equal((await linkRequest("GET", link)).status, 410);
+  assert.equal(await getEntryShare(link.id), null);
+});
+
+integration("a status check that reaches a lagging replica keeps a live Never link", async () => {
+  const { link } = await createLink("never");
+  laggingReplica = true;
+  try {
+    // A 410 here makes the browser discard the only controls of a link that
+    // never expires. The primary still has it, so the answer must be Never.
+    assert.deepEqual(await linkRequest("GET", link), { status: 200, body: { expiresAt: null } });
+    assert.deepEqual(await linkRequest("PATCH", link, { expiresIn: "never" }), { status: 200, body: { expiresAt: null } });
+    assert.deepEqual(await linkRequest("DELETE", link), { status: 200, body: { ok: true } });
+  } finally {
+    laggingReplica = false;
+  }
+  assert.equal(await getEntryShare(link.id), null);
+});
+
+integration("store failures still answer 502 and log the store's reason", async () => {
+  const { link } = await createLink("never");
+  const logged = mock.method(console, "error", () => {});
+  storeError = "ERR simulated store failure";
+  try {
+    for (const method of ["GET", "PUT", "PATCH", "DELETE"] as const) {
+      const response = await linkRequest(method, link, method === "PUT" ? entryBody : method === "PATCH" ? { expiresIn: "never" } : undefined);
+      assert.equal(response.status, 502);
+      assert.ok(!JSON.stringify(response.body).includes("simulated"));
+    }
+  } finally {
+    storeError = null;
+    logged.mock.restore();
+  }
+  assert.equal(logged.mock.callCount(), 4);
+  for (const call of logged.mock.calls) {
+    assert.match(String(call.arguments[1]), /Share store responded with 400: ERR simulated store failure/);
+    assert.ok(!call.arguments.map(String).join(" ").includes(link.token));
+  }
+  assert.deepEqual(await linkRequest("GET", link), { status: 200, body: { expiresAt: null } });
 });

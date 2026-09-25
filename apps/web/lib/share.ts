@@ -48,7 +48,12 @@ async function redis(command: (string | number)[]): Promise<unknown> {
     cache: "no-store",
     signal: AbortSignal.timeout(5_000),
   });
-  if (!res.ok) throw new Error(`Share store responded with ${res.status}`);
+  if (!res.ok) {
+    // Upstash explains a rejected command in the body of its 400 response;
+    // keep that reason so a failed request can be diagnosed from server logs.
+    const reason = await res.json().then((body) => body?.error, () => undefined);
+    throw new Error(`Share store responded with ${res.status}${typeof reason === "string" ? `: ${reason}` : ""}`);
+  }
   const body = (await res.json()) as { result?: unknown; error?: string };
   if (body.error) throw new Error(body.error);
   return body.result;
@@ -264,6 +269,9 @@ export type EntryShareMutation = "ok" | "missing" | "denied" | "conflict" | "lim
 // an update that races with a deletion can never recreate the deleted link.
 // An omitted expiry keeps the exact remaining TTL, including old records that
 // predate expiresAt. Explicit Never uses SET without EX, removing any old TTL.
+// The deployed store requires scripts to be deterministic: values come from
+// KEYS, ARGV, or data read here, never the store's clock. ARGV[6] is the app's
+// current time, the same clock creation uses for expiresAt.
 const MUTATE_ENTRY_SCRIPT = `
 local raw = redis.call('GET', KEYS[1])
 if not raw then return { 'missing' } end
@@ -279,8 +287,7 @@ if ttl == -2 or ttl == 0 then
   return { 'missing' }
 end
 if ARGV[4] ~= 'keep' then ttl = tonumber(ARGV[4]) end
-local now = redis.call('TIME')
-local nowMs = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+local nowMs = tonumber(ARGV[6])
 if ARGV[2] == 'status' then
   if ttl < 0 then return { 'ok', -1 } end
   return { 'ok', nowMs + ttl }
@@ -307,7 +314,11 @@ async function mutateEntryShare(
 ): Promise<{ result: EntryShareMutation; expiresAt: number | null }> {
   if (!SHARE_ID_PATTERN.test(id)) return { result: "missing", expiresAt: null };
   if (!SHARE_ID_PATTERN.test(token)) return { result: "denied", expiresAt: null };
-  const raw = await redis(["GET", entryKey(id)]);
+  let raw = await redis(["GET", entryKey(id)]);
+  // Plain reads may be served by a replica that hasn't received a recent write
+  // yet. Scripts run on the primary, so confirm there before reporting a link
+  // gone: the browser discards its only controls when told a link is missing.
+  if (typeof raw !== "string") raw = await redis(["EVAL", "return redis.call('GET', KEYS[1])", 1, entryKey(id)]);
   if (typeof raw !== "string") {
     if (action === "delete") {
       const result = await redis([
@@ -350,6 +361,7 @@ return 'missing'`,
     JSON.stringify(next),
     seconds === undefined ? "keep" : seconds === null ? -1 : seconds * 1000,
     tokenHash(token),
+    Date.now(),
   ]);
   if (!Array.isArray(response) || !["ok", "missing", "denied", "conflict"].includes(response[0])) {
     throw new Error("Invalid share store response");
