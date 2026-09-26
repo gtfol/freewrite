@@ -9,11 +9,10 @@
 // $CRON_SECRET`, which is the only thing standing between this and the open
 // internet — so the route refuses to run at all when that secret isn't set.
 
-import { timingSafeEqual } from "node:crypto";
-
 import { NextResponse } from "next/server";
 
 import { getAuth } from "@/lib/server/auth";
+import { cronAuthorized } from "@/lib/server/cron";
 import { connectedUserIds, recordPlays } from "@/lib/server/plays";
 import { HISTORY_LIMIT, playsFrom } from "@/lib/spotify";
 
@@ -32,17 +31,6 @@ const HISTORY_URL = `https://api.spotify.com/v1/me/player/recently-played?limit=
 // One writer's poll should never be able to take the whole run down with it: a
 // revoked token is an ordinary state, not an outage.
 const CONCURRENCY = 4;
-
-function authorized(request: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  const offered = request.headers.get("authorization") ?? "";
-  const expected = `Bearer ${secret}`;
-  // Same length is a precondition for timingSafeEqual, and comparing the
-  // lengths first leaks only the length.
-  if (offered.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(offered), Buffer.from(expected));
-}
 
 async function pollOne(
   auth: NonNullable<ReturnType<typeof getAuth>>,
@@ -80,7 +68,7 @@ async function pollOne(
 }
 
 export async function GET(request: Request) {
-  if (!authorized(request)) {
+  if (!cronAuthorized(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const auth = getAuth();

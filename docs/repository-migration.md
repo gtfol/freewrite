@@ -33,7 +33,7 @@ npm run build
 npm run start
 ```
 
-Install Redis to exercise the isolated sharing integration tests. Account-deletion database tests require the disposable database described in the web README; they must never use production credentials. The existing CSS minifier warnings for `::highlight` are unrelated to this move.
+Install PostgreSQL to exercise the isolated sharing integration tests. Account-deletion database tests require the disposable database described in the web README; they must never use production credentials. The existing CSS minifier warnings for `::highlight` are unrelated to this move.
 
 ## Local verification record
 

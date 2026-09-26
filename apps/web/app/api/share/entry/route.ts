@@ -64,6 +64,7 @@ export async function POST(request: Request) {
     return NextResponse.json(result, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof EntryShareCreateError) return NextResponse.json({ error: error.message }, { status: error.status });
+    console.error("Couldn't create a share link:", error);
     return NextResponse.json(
       { error: "Couldn't create a share link" },
       { status: 502 }

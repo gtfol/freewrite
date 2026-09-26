@@ -26,7 +26,7 @@ jobs:
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
       - name: Install integration test dependency
-        run: sudo apt-get update && sudo apt-get install -y redis-server
+        run: sudo apt-get update && sudo apt-get install -y postgresql
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
