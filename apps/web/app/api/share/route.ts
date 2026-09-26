@@ -80,7 +80,8 @@ export async function POST(request: Request) {
 
     const { id, ttlSeconds } = await putShare(payload);
     return NextResponse.json({ id, ttlSeconds });
-  } catch {
+  } catch (error) {
+    console.error("Couldn't create a reader share link:", error);
     return NextResponse.json(
       { error: "Couldn't create a share link" },
       { status: 502 }

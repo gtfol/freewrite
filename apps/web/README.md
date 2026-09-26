@@ -15,7 +15,7 @@ npm install
 npm run dev
 ```
 
-`npm test` runs the test suite. install `redis-server` and `redis-cli` to include the isolated share-store integration tests; those tests skip when Redis is unavailable.
+`npm test` runs the test suite. install postgresql (the tests start their own throwaway cluster with `initdb`, which refuses to run as root) to include the sharing integration tests; they skip when Postgres is unavailable, and fail instead in CI.
 
 ## local PDFs
 
@@ -54,13 +54,15 @@ remote database connections verify the server's certificate and hostname. `DATAB
 
 ## sharing (optional)
 
-entries can be published as read-only pages (`share` in the nav), and the reader uses the same store for temporary chat snapshots. to enable it:
+entries can be published as read-only pages (`share` in the nav), and the reader uses the same tables for temporary chat snapshots. sharing uses the sync database, so it needs `DATABASE_URL` (see sync above):
 
-1. create an upstash redis (or vercel kv) database
-2. set `KV_REST_API_URL` + `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`)
+1. existing install: run `db/migrations/0007_shares.sql` in the supabase sql editor **before** deploying this version
+2. set `CRON_SECRET` in vercel if it isn't already; `/api/cron/shares` (hourly, in `vercel.json`) removes lapsed content
+3. the former `KV_REST_API_URL` / `KV_REST_API_TOKEN` (upstash) variables are no longer used and can be removed. links stored in upstash are not carried over
+
 entry links default to **7 days**. the Share popover offers **7 days**, **30 days**, and **Never**. choose an expiry when creating a link, or use **Save expiry** on an existing link. expiry changes preserve the published snapshot; **Update link** publishes the current entry while preserving its remaining lifetime. existing links keep their current expiry until explicitly changed. the former `SHARE_ENTRY_TTL_SECONDS` setting is no longer used.
 
-links are unlisted (random 128-bit ids) and noindexed. timed snapshots are removed by Redis expiry. Never links remain until the author deletes them (or the backing store is removed); changing a timed link to Never removes its Redis TTL. small permanent ID/owner-hash markers prevent a delayed request from recreating an expired or revoked link; these markers contain no entry content. no database migration or new environment variable is required.
+links are unlisted (random 128-bit ids) and noindexed. a timed link stops being served the moment it expires, and the hourly sweep then deletes its content. Never links remain until the author deletes them; changing a timed link to Never clears its expiry. revoked and expired links keep a small row (id and a sha-256 hash of the management token, no entry content) so a delayed request can't recreate them. the share tables enable row level security with no policies, so supabase's public data api can't list them; the app's own connection owns the tables and is unaffected.
 
 the management token is kept in the author's browser and sent only to the server when updating or deleting that link; it is never included in the public URL or page. clearing browser data loses those controls. IDs and management tokens are saved before publication, so a lost response can be retried without losing control of the link. **Check link** recovers its actual expiry after an uncertain change. expired-looking local records keep their controls until the server confirms they are gone. browser Web Locks serialize management across tabs; storage failures are reported, with a retry/delete path. deleting a shared entry first revokes its link; if that fails, the entry and its controls stay available for another attempt.
 

@@ -28,9 +28,6 @@ function unavailable() {
 
 function mutationError(result: Exclude<EntryShareMutation, "ok">) {
   if (result === "limited") return NextResponse.json({ error: "Too many new links right now — try again later" }, { status: 429 });
-  if (result === "conflict") {
-    return NextResponse.json({ error: "This link changed in another tab. Try again." }, { status: 409 });
-  }
   return result === "missing"
     ? NextResponse.json(
         { error: "This share link has expired or was deleted" },
@@ -39,8 +36,8 @@ function mutationError(result: Exclude<EntryShareMutation, "ok">) {
     : NextResponse.json({ error: "Not allowed" }, { status: 403 });
 }
 
-// Clients get a generic message; the store's reason goes to the server log so a
-// 502 can be traced to the command the store rejected.
+// Clients get a generic message; the database's reason goes to the server log
+// so a 502 can be traced to what failed.
 function storeFailure(message: string, error: unknown) {
   console.error(`${message}:`, error);
   return NextResponse.json({ error: message }, { status: 502 });

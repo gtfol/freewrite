@@ -1,15 +1,17 @@
-import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { createHash, randomBytes } from "crypto";
 
 import { ALL_FONTS, DEFAULT_FONT_ID, DEFAULT_FONT_SIZE } from "./fonts.ts";
+import { dbConfigured, getPool } from "./server/db.ts";
 import { parseSketches } from "./sketch.ts";
 import type { Sketch } from "./types.ts";
 import { entryShareTtlSeconds, type EntryShareExpiry } from "./share-expiry.ts";
 
-// Ephemeral article snapshots for the reader's chat link-out, stored in
-// Upstash Redis / Vercel KV via its REST API (plain fetch, no client dep).
-// A 128-bit random id is the capability; the store's TTL is the expiry —
-// content is physically gone once it lapses. Without the env vars the
-// feature reports itself disabled and the chat flow falls back to link-out.
+// Share links live in the app's Postgres database (db/migrations/0007). Two
+// kinds: the reader's temporary chat snapshots and published entries. A
+// 128-bit random id is the capability to read either one. Lapsed rows stop
+// being served the moment they expire; /api/cron/shares removes their content.
+// Without DATABASE_URL the feature reports itself disabled and the reader's
+// chat flow falls back to link-out.
 
 const DEFAULT_TTL_SECONDS = 30 * 60;
 const MAX_SHARES_PER_IP_PER_HOUR = 60;
@@ -23,40 +25,8 @@ export function shareTtlSeconds(): number {
     : DEFAULT_TTL_SECONDS;
 }
 
-function kvEnv(): { url: string; token: string } | null {
-  const url =
-    process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
-  const token =
-    process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
-  return url && token ? { url, token } : null;
-}
-
 export function shareEnabled(): boolean {
-  return kvEnv() !== null;
-}
-
-async function redis(command: (string | number)[]): Promise<unknown> {
-  const env = kvEnv();
-  if (!env) throw new Error("Share store is not configured");
-  const res = await fetch(env.url, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${env.token}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(command),
-    cache: "no-store",
-    signal: AbortSignal.timeout(5_000),
-  });
-  if (!res.ok) {
-    // Upstash explains a rejected command in the body of its 400 response;
-    // keep that reason so a failed request can be diagnosed from server logs.
-    const reason = await res.json().then((body) => body?.error, () => undefined);
-    throw new Error(`Share store responded with ${res.status}${typeof reason === "string" ? `: ${reason}` : ""}`);
-  }
-  const body = (await res.json()) as { result?: unknown; error?: string };
-  if (body.error) throw new Error(body.error);
-  return body.result;
+  return dbConfigured();
 }
 
 export async function putShare(
@@ -64,29 +34,46 @@ export async function putShare(
 ): Promise<{ id: string; ttlSeconds: number }> {
   const id = randomBytes(16).toString("base64url");
   const ttl = shareTtlSeconds();
-  await redis(["SET", `share:${id}`, payload, "EX", ttl]);
+  await getPool().query(
+    "insert into reader_shares (id, payload, expires_at) values ($1, $2, now() + $3::int * interval '1 second')",
+    [id, payload, ttl]
+  );
   return { id, ttlSeconds: ttl };
 }
 
 export async function getShare(id: string): Promise<string | null> {
   if (!SHARE_ID_PATTERN.test(id)) return null;
-  const result = await redis(["GET", `share:${id}`]);
-  return typeof result === "string" ? result : null;
+  const { rows } = await getPool().query(
+    "select payload from reader_shares where id = $1 and expires_at > now()",
+    [id]
+  );
+  return rows[0]?.payload ?? null;
+}
+
+// A fixed one-hour window per address, counted atomically in one statement.
+async function countShare(ip: string): Promise<number> {
+  const { rows } = await getPool().query(
+    `insert into share_rate_limits as limits (ip, window_start, count) values ($1, now(), 1)
+     on conflict (ip) do update set
+       count = case when limits.window_start <= now() - interval '1 hour' then 1 else limits.count + 1 end,
+       window_start = case when limits.window_start <= now() - interval '1 hour' then now() else limits.window_start end
+     returning count`,
+    [ip]
+  );
+  return rows[0].count;
 }
 
 export async function allowShare(ip: string): Promise<boolean> {
-  const key = `share-rl:${ip}`;
-  const count = await redis(["INCR", key]);
-  if (count === 1) await redis(["EXPIRE", key, 3600]);
-  return typeof count === "number" && count <= MAX_SHARES_PER_IP_PER_HOUR;
+  return (await countShare(ip)) <= MAX_SHARES_PER_IP_PER_HOUR;
 }
 
 // --- Entry shares -------------------------------------------------------
-// A written entry published as a read-only page at /share/:id. Creating a
-// link returns the id plus a secret token that stays in the author's
-// browser; the token is what authorizes updating or deleting the link
-// later. Snapshots live in the same KV store under their own, much longer
-// lifetime. Timed links use Redis expiry; Never links remain until revoked.
+// A written entry published as a read-only page at /share/:id. The id and a
+// secret token are created in the author's browser before publishing; only a
+// hash of the token is stored, and it is what authorizes updating, re-timing
+// or deleting the link later. Timed links carry expires_at; Never links have
+// none and remain until revoked. Revoking or expiring clears the snapshot but
+// keeps the row, so a delayed request can't recreate a retired id.
 
 export interface EntryShareSnapshot {
   content: string;
@@ -155,46 +142,22 @@ export function entrySnapshotFromBody(body: {
   };
 }
 
-function entryKey(id: string): string {
-  return `share:entry:${id}`;
-}
-
-async function readEntryShare(
-  id: string
-): Promise<(EntryShareSnapshot & { token: string }) | null> {
-  if (!SHARE_ID_PATTERN.test(id)) return null;
-  const result = await redis(["GET", entryKey(id)]);
-  if (typeof result !== "string") return null;
-  try {
-    const parsed = JSON.parse(result) as Partial<
-      EntryShareSnapshot & { token: string }
-    >;
-    if (typeof parsed.content !== "string" || !parsed.content.trim()) {
-      return null;
-    }
-    if (typeof parsed.token !== "string") return null;
-    // Re-validated on the way out as well as in: the snapshot is only as
-    // trustworthy as the store it came from, and its
-    // drawings end up as markup on a public page.
-    const sketches = parseSketches(parsed.sketches);
-    return {
-      content: parsed.content,
-      fontId:
-        typeof parsed.fontId === "string" ? parsed.fontId : DEFAULT_FONT_ID,
-      fontSize:
-        typeof parsed.fontSize === "number"
-          ? parsed.fontSize
-          : DEFAULT_FONT_SIZE,
-      ...(sketches !== null && sketches !== false && { sketches }),
-      createdAt:
-        typeof parsed.createdAt === "number" ? parsed.createdAt : Date.now(),
-      sharedAt:
-        typeof parsed.sharedAt === "number" ? parsed.sharedAt : Date.now(),
-      token: parsed.token,
-    };
-  } catch {
-    return null;
-  }
+// Re-validated on the way out as well as in: the snapshot is only as
+// trustworthy as the store it came from, and its drawings end up as markup
+// on a public page.
+function publicSnapshot(stored: unknown): EntryShareSnapshot | null {
+  if (!stored || typeof stored !== "object") return null;
+  const parsed = stored as Partial<EntryShareSnapshot>;
+  if (typeof parsed.content !== "string" || !parsed.content.trim()) return null;
+  const sketches = parseSketches(parsed.sketches);
+  return {
+    content: parsed.content,
+    fontId: typeof parsed.fontId === "string" ? parsed.fontId : DEFAULT_FONT_ID,
+    fontSize: typeof parsed.fontSize === "number" ? parsed.fontSize : DEFAULT_FONT_SIZE,
+    ...(sketches !== null && sketches !== false && { sketches }),
+    createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : Date.now(),
+    sharedAt: typeof parsed.sharedAt === "number" ? parsed.sharedAt : Date.now(),
+  };
 }
 
 export interface EntryShareCapability { id: string; token: string }
@@ -204,23 +167,14 @@ export class EntryShareCreateError extends Error {
   constructor(status: number, message: string) { super(message); this.status = status; }
 }
 
-const CREATE_ENTRY_SCRIPT = `
-local owner = redis.call('GET', KEYS[2])
-local raw = redis.call('GET', KEYS[1])
-if owner then
-  if owner ~= ARGV[1] then return 'denied' end
-  if not raw then return 'retired' end
-  return 'existing'
-end
-if raw then return 'denied' end
-redis.call('SET', KEYS[2], ARGV[1])
-if ARGV[3] == '-1' then redis.call('SET', KEYS[1], ARGV[2])
-else redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3]) end
-return 'created'
-`;
+function tokenHash(token: string): string { return createHash("sha256").update(token).digest("hex"); }
 
-function ownerKey(id: string): string { return `share:entry-owner:${id}`; }
-function tokenHash(token: string): string { return createHash('sha256').update(token).digest('hex'); }
+const LIVE = "snapshot is not null and (expires_at is null or expires_at > now())";
+const EXPIRES_AT = "(extract(epoch from expires_at) * 1000)::bigint as expires_at";
+
+function epochMs(value: string | number | null): number | null {
+  return value === null ? null : Number(value);
+}
 
 export async function putEntryShare(
   snapshot: EntryShareSnapshot,
@@ -233,164 +187,94 @@ export async function putEntryShare(
     throw new EntryShareCreateError(400, "Invalid link controls");
   }
   const ttlSeconds = entryShareTtlSeconds(expiry);
-  const expiresAt = ttlSeconds === null ? null : Date.now() + ttlSeconds * 1000;
-  const result = await redis([
-    "EVAL", CREATE_ENTRY_SCRIPT, 2, entryKey(id), ownerKey(id), tokenHash(token),
-    JSON.stringify({ ...snapshot, token, expiresAt }), ttlSeconds ?? -1,
-  ]);
-  if (result === "denied") throw new EntryShareCreateError(403, "Not allowed");
-  if (result === "retired") throw new EntryShareCreateError(410, "This link expired or was deleted. Create a new link.");
-  if (result === "existing") {
-    // A retry after a lost response returns the same link, preserving the first
-    // published snapshot and expiry rather than republishing current edits.
-    const status = await getEntryShareStatus(id, token);
-    if (status.result === "missing") throw new EntryShareCreateError(410, "This link expired or was deleted. Create a new link.");
-    if (status.result !== "ok") throw new EntryShareCreateError(status.result === "denied" ? 403 : 409, "This link changed. Check it and try again.");
-    return { id, token, expiresAt: status.expiresAt,
-      ttlSeconds: status.expiresAt === null ? null : Math.max(0, Math.ceil((status.expiresAt - Date.now()) / 1000)) };
-  }
-  if (result !== "created") throw new Error("Invalid share store response");
-  return { id, token, ttlSeconds, expiresAt };
+  const pool = getPool();
+  const created = await pool.query(
+    `insert into entry_shares (id, token_hash, snapshot, expires_at)
+     values ($1, $2, $3::jsonb, now() + $4::int * interval '1 second')
+     on conflict (id) do nothing
+     returning ${EXPIRES_AT}`,
+    [id, tokenHash(token), JSON.stringify(snapshot), ttlSeconds]
+  );
+  if (created.rows[0]) return { id, token, ttlSeconds, expiresAt: epochMs(created.rows[0].expires_at) };
+
+  // A retry after a lost response returns the same link, preserving the first
+  // published snapshot and expiry rather than republishing current edits.
+  const { rows } = await pool.query(
+    `select token_hash = $2 as owner, ${LIVE} as live, ${EXPIRES_AT} from entry_shares where id = $1`,
+    [id, tokenHash(token)]
+  );
+  if (!rows[0]?.owner) throw new EntryShareCreateError(403, "Not allowed");
+  if (!rows[0].live) throw new EntryShareCreateError(410, "This link expired or was deleted. Create a new link.");
+  const expiresAt = epochMs(rows[0].expires_at);
+  return { id, token, expiresAt,
+    ttlSeconds: expiresAt === null ? null : Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)) };
 }
 
 export async function getEntryShare(
   id: string
 ): Promise<EntryShareSnapshot | null> {
-  const stored = await readEntryShare(id);
-  if (!stored) return null;
-  // Management tokens never reach the public page.
-  const { content, fontId, fontSize, createdAt, sharedAt, sketches } = stored;
-  return { content, fontId, fontSize, createdAt, sharedAt, ...(sketches && { sketches }) };
+  if (!SHARE_ID_PATTERN.test(id)) return null;
+  const { rows } = await getPool().query(
+    `select snapshot from entry_shares where id = $1 and ${LIVE}`,
+    [id]
+  );
+  return rows[0] ? publicSnapshot(rows[0].snapshot) : null;
 }
 
-export type EntryShareMutation = "ok" | "missing" | "denied" | "conflict" | "limited";
+export type EntryShareMutation = "ok" | "missing" | "denied" | "limited";
 
-// Atomically compare the capability-verified record before mutating. In particular,
-// an update that races with a deletion can never recreate the deleted link.
-// An omitted expiry keeps the exact remaining TTL, including old records that
-// predate expiresAt. Explicit Never uses SET without EX, removing any old TTL.
-// The deployed store requires scripts to be deterministic: values come from
-// KEYS, ARGV, or data read here, never the store's clock. ARGV[6] is the app's
-// current time, the same clock creation uses for expiresAt.
-const MUTATE_ENTRY_SCRIPT = `
-local raw = redis.call('GET', KEYS[1])
-if not raw then return { 'missing' } end
-if raw ~= ARGV[1] then return { 'conflict' } end
-if ARGV[2] == 'delete' then
-  redis.call('SET', KEYS[2], ARGV[5])
-  redis.call('DEL', KEYS[1])
-  return { 'ok' }
-end
-local ttl = redis.call('PTTL', KEYS[1])
-if ttl == -2 or ttl == 0 then
-  redis.call('DEL', KEYS[1])
-  return { 'missing' }
-end
-if ARGV[4] ~= 'keep' then ttl = tonumber(ARGV[4]) end
-local nowMs = tonumber(ARGV[6])
-if ARGV[2] == 'status' then
-  if ttl < 0 then return { 'ok', -1 } end
-  return { 'ok', nowMs + ttl }
-end
--- Add one top-level metadata field without round-tripping the content through
--- Lua cjson, which turns empty drawing arrays into objects.
-local base = string.sub(ARGV[3], 1, -2)
-if ttl < 0 then
-  redis.call('SET', KEYS[1], base .. ',"expiresAt":null}')
-  return { 'ok', -1 }
-end
-local expiresAt = nowMs + ttl
-redis.call('SET', KEYS[1], base .. ',"expiresAt":' .. string.format('%.0f', expiresAt) .. '}', 'PX', ttl)
-return { 'ok', expiresAt }
-`;
+const OWNED_LIVE = `id = $1 and token_hash = $2 and ${LIVE}`;
 
-async function mutateEntryShare(
+// Each change is one conditional statement on a live row owned by the token,
+// so a change that races with a deletion or expiry can never resurrect it.
+// `statement` matches on OWNED_LIVE and yields the row's expires_at.
+async function onLiveEntry(
   id: string,
   token: string,
-  action: "update" | "expiry" | "delete" | "status",
-  snapshot?: EntryShareSnapshot,
-  expiry?: EntryShareExpiry,
-  ip = "unknown"
+  statement: string,
+  values: unknown[] = []
 ): Promise<{ result: EntryShareMutation; expiresAt: number | null }> {
   if (!SHARE_ID_PATTERN.test(id)) return { result: "missing", expiresAt: null };
   if (!SHARE_ID_PATTERN.test(token)) return { result: "denied", expiresAt: null };
-  let raw = await redis(["GET", entryKey(id)]);
-  // Plain reads may be served by a replica that hasn't received a recent write
-  // yet. Scripts run on the primary, so confirm there before reporting a link
-  // gone: the browser discards its only controls when told a link is missing.
-  if (typeof raw !== "string") raw = await redis(["EVAL", "return redis.call('GET', KEYS[1])", 1, entryKey(id)]);
-  if (typeof raw !== "string") {
-    if (action === "delete") {
-      const result = await redis([
-        "EVAL",
-        `local owner = redis.call('GET', KEYS[2])
-if owner and owner ~= ARGV[1] then return 'denied' end
-if redis.call('EXISTS', KEYS[1]) == 1 then return 'conflict' end
-if not owner then
-  local count = redis.call('INCR', KEYS[3])
-  if count == 1 then redis.call('EXPIRE', KEYS[3], 3600) end
-  if count > tonumber(ARGV[2]) then return 'limited' end
-end
-redis.call('SET', KEYS[2], ARGV[1])
-return 'missing'`,
-        3, entryKey(id), ownerKey(id), `share-rl:${ip}`, tokenHash(token), MAX_SHARES_PER_IP_PER_HOUR,
-      ]);
-      if (result === "denied" || result === "conflict" || result === "limited") return { result, expiresAt: null };
-    }
-    return { result: "missing", expiresAt: null };
-  }
-  let stored: Record<string, unknown>;
-  try {
-    stored = JSON.parse(raw);
-    if (!stored || typeof stored !== "object" || typeof stored.token !== "string") throw new Error();
-  } catch {
-    return { result: "missing", expiresAt: null };
-  }
-  const expected = Buffer.from(stored.token as string);
-  const given = Buffer.from(token);
-  if (expected.length !== given.length || !timingSafeEqual(expected, given)) {
-    return { result: "denied", expiresAt: null };
-  }
-  // Remove old expiry metadata before the script writes the new value. Using
-  // the original JSON fields for expiry-only changes preserves the snapshot.
-  const next = snapshot ? { ...snapshot, token: stored.token } : { ...stored };
-  if ("expiresAt" in next) delete next.expiresAt;
-  const seconds = expiry === undefined ? undefined : entryShareTtlSeconds(expiry);
-  const response = await redis([
-    "EVAL", MUTATE_ENTRY_SCRIPT, 2, entryKey(id), ownerKey(id), raw, action,
-    JSON.stringify(next),
-    seconds === undefined ? "keep" : seconds === null ? -1 : seconds * 1000,
-    tokenHash(token),
-    Date.now(),
-  ]);
-  if (!Array.isArray(response) || !["ok", "missing", "denied", "conflict"].includes(response[0])) {
-    throw new Error("Invalid share store response");
-  }
-  return {
-    result: response[0] as EntryShareMutation,
-    expiresAt: typeof response[1] === "number" && response[1] >= 0 ? response[1] : null,
-  };
+  const hash = tokenHash(token);
+  const { rows } = await getPool().query(statement, [id, hash, ...values]);
+  if (rows[0]) return { result: "ok", expiresAt: epochMs(rows[0].expires_at) };
+  const owner = await getPool().query(
+    "select token_hash = $2 as owner from entry_shares where id = $1",
+    [id, hash]
+  );
+  return { result: owner.rows[0] && !owner.rows[0].owner ? "denied" : "missing", expiresAt: null };
 }
 
+// An omitted expiry keeps the remaining lifetime; an explicit one restarts it
+// from now, and Never clears it.
 export async function updateEntryShare(
   id: string,
   token: string,
   snapshot: EntryShareSnapshot,
   expiry?: EntryShareExpiry
 ): Promise<{ result: EntryShareMutation; expiresAt: number | null }> {
-  return mutateEntryShare(id, token, "update", snapshot, expiry);
+  return onLiveEntry(id, token,
+    `update entry_shares set snapshot = $3::jsonb,
+       expires_at = case when $4::boolean then now() + $5::int * interval '1 second' else expires_at end
+     where ${OWNED_LIVE} returning ${EXPIRES_AT}`,
+    [JSON.stringify(snapshot), expiry !== undefined, expiry === undefined ? null : entryShareTtlSeconds(expiry)]);
 }
 
+// Expiry changes do not touch the published snapshot.
 export async function changeEntryShareExpiry(
   id: string,
   token: string,
   expiry: EntryShareExpiry
 ): Promise<{ result: EntryShareMutation; expiresAt: number | null }> {
-  return mutateEntryShare(id, token, "expiry", undefined, expiry);
+  return onLiveEntry(id, token,
+    `update entry_shares set expires_at = now() + $3::int * interval '1 second'
+     where ${OWNED_LIVE} returning ${EXPIRES_AT}`,
+    [entryShareTtlSeconds(expiry)]);
 }
 
 export async function getEntryShareStatus(id: string, token: string) {
-  return mutateEntryShare(id, token, "status");
+  return onLiveEntry(id, token, `select ${EXPIRES_AT} from entry_shares where ${OWNED_LIVE}`);
 }
 
 export async function deleteEntryShare(
@@ -398,5 +282,39 @@ export async function deleteEntryShare(
   token: string,
   ip = "unknown"
 ): Promise<EntryShareMutation> {
-  return (await mutateEntryShare(id, token, "delete", undefined, undefined, ip)).result;
+  if (!SHARE_ID_PATTERN.test(id)) return "missing";
+  if (!SHARE_ID_PATTERN.test(token)) return "denied";
+  const pool = getPool();
+  // Clear this token's snapshot even if it already lapsed; report whether the
+  // link was still live.
+  const { rows } = await pool.query(
+    `with link as (select id, ${LIVE} as live from entry_shares where id = $1 and token_hash = $2 for update)
+     update entry_shares set snapshot = null from link where entry_shares.id = link.id returning link.live`,
+    [id, tokenHash(token)]
+  );
+  if (rows[0]) return rows[0].live ? "ok" : "missing";
+  const existing = await pool.query("select 1 from entry_shares where id = $1", [id]);
+  if (existing.rows[0]) return "denied";
+  // An id nobody has published yet may belong to a create still in flight.
+  // Retire it under this token so that late request can't publish it; new
+  // retirements count toward the same per-address limit as new links.
+  if (!(await allowShare(ip))) return "limited";
+  const retired = await pool.query(
+    "insert into entry_shares (id, token_hash) values ($1, $2) on conflict (id) do nothing returning id",
+    [id, tokenHash(token)]
+  );
+  // Lost a race with that create: revoke what it just published.
+  return retired.rows[0] ? "missing" : deleteEntryShare(id, token, ip);
+}
+
+// Scheduled by /api/cron/shares. Lapsed entry links keep their id and owner
+// hash, retired as above; everything else about expired shares is removed.
+export async function purgeExpiredShares(): Promise<{ entries: number; snapshots: number }> {
+  const pool = getPool();
+  const entries = await pool.query(
+    "update entry_shares set snapshot = null where snapshot is not null and expires_at <= now()"
+  );
+  const snapshots = await pool.query("delete from reader_shares where expires_at <= now()");
+  await pool.query("delete from share_rate_limits where window_start <= now() - interval '1 hour'");
+  return { entries: entries.rowCount ?? 0, snapshots: snapshots.rowCount ?? 0 };
 }
