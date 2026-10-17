@@ -108,6 +108,20 @@ a downloaded entry is one markdown file with nowhere to keep a stroke list, so e
 
 if you sync, apply `db/migrations/0005_sketches.sql` — drawings are their own table. (`0004` added a column on `entries` that `0005` supersedes; applying both in order is fine.)
 
+## diagrams
+
+Type `/diagram` to insert an editable Mermaid example, or add a fenced
+`mermaid` code block. Preview and shared entries render it with
+[Pele](https://pele.run), matching the app's theme and adapting to the available
+width. Large diagrams support zoom and pan. “Diagram source” reveals the
+original text; invalid diagrams keep their source visible.
+
+Rendering happens in the browser, with no diagram service or API key. Pele loads
+only when a diagram is present. Diagram links and remote images are disabled;
+source, edge and output limits bound rendering. Markdown downloads preserve the
+Mermaid source. Native iOS currently edits plain Markdown and does not render
+diagram previews.
+
 ## stack
 
 next.js · tailwind · shadcn/ui · zustand · indexeddb · drawesome (drawing) · piper via onnx runtime web (on-device tts) · better auth + supabase (optional sync)

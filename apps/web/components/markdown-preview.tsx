@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { JsonTree } from "@/components/json-tree";
 import { Lightbox, type LightboxMedia } from "@/components/lightbox";
+import { diagramFrame, diagramUnavailable, mountDiagrams } from "@/lib/mermaid";
 import { BOARD, sketchIdFrom } from "@/lib/sketch";
 import { sketchDataUri, sketchView } from "@/lib/sketch-svg";
 import { embedUrl, splitLabel, trackIdFrom } from "@/lib/spotify";
@@ -128,6 +129,7 @@ const marked = new Marked({
     },
     code({ text, lang }) {
       const language = lang?.split(/\s/)[0];
+      if (language?.toLowerCase() === "mermaid") return diagramFrame(text);
       const known = language && hljs.getLanguage(language) ? language : null;
       const body = known
         ? hljs.highlight(text, { language: known }).value
@@ -292,6 +294,26 @@ export function MarkdownPreview({
   const segments = useMemo(() => segment(content), [content]);
   const [zoomed, setZoomed] = useState<LightboxMedia | null>(null);
   const root = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const element = root.current;
+    if (!element?.querySelector("[data-mermaid-canvas]")) return;
+    let cancelled = false;
+    let destroy: (() => void) | undefined;
+    // Wait for a pause in typing before laying out diagrams in split preview.
+    const timer = window.setTimeout(() => {
+      void import("pele").then(({ mount }) => {
+        if (!cancelled) destroy = mountDiagrams(element, mount);
+      }).catch(() => {
+        if (!cancelled) diagramUnavailable(element);
+      });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      destroy?.();
+    };
+  }, [segments, fontFamily, fontSize]);
 
   // Serializing is the expensive part, so it happens once per change to the
   // drawings rather than once per keystroke in the side-by-side pane.
