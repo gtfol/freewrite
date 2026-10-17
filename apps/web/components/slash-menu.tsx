@@ -4,14 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { caretPoint } from "@/lib/caret";
 import { isToday, shortDate } from "@/lib/entries";
+import { DIAGRAM_TEMPLATE } from "@/lib/mermaid";
 import { newSketchId, sketchBefore, sketchRef } from "@/lib/sketch";
 import { dayOf, trackMarkdown } from "@/lib/spotify";
 import { useSpotify } from "@/lib/spotify-connect";
 import { currentEntry, useWriter } from "@/lib/store";
 import { useSync } from "@/lib/sync";
 
-// Type "/" and the two things you can drop into an entry are a keystroke away:
-// the song you played most the day the entry was written, and a whiteboard.
+// Type "/" to insert a song, whiteboard, or Mermaid diagram.
 
 const MENU_WIDTH = 288;
 // Enough to decide whether the menu fits below the caret before it renders.
@@ -34,7 +34,7 @@ const DRAW_KEYWORDS = [
 // a list of closures over that ref isn't something to be building during a
 // render.
 interface Item {
-  key: "song" | "draw";
+  key: "song" | "draw" | "diagram";
   label: string;
   hint: string;
   keywords: string[];
@@ -131,9 +131,7 @@ export function useSlashMenu(
     [ref]
   );
 
-  // Both commands are offered unless Spotify is switched off on the
-  // deployment, in which case the song simply isn't one of them.
-  const rowCount = configured ? 2 : 1;
+  const rowCount = configured ? 3 : 2;
 
   const move = useCallback(
     (index: number | null) => {
@@ -309,7 +307,13 @@ export function useSlashMenu(
     hint: editing ? "reopen the drawing above" : "draw, and it lands here",
     keywords: DRAW_KEYWORDS,
   };
-  const items = configured ? [songItem, drawItem] : [drawItem];
+  const diagramItem: Item = {
+    key: "diagram",
+    label: "Diagram",
+    hint: "Mermaid · renders in Preview",
+    keywords: ["diagram", "mermaid", "pele", "flowchart", "chart"],
+  };
+  const items = configured ? [songItem, drawItem, diagramItem] : [drawItem, diagramItem];
 
   const visible = items.filter((item) => matchesQuery(item, query));
   const selected = Math.min(cursor, Math.max(0, visible.length - 1));
@@ -341,9 +345,13 @@ export function useSlashMenu(
   const run = useCallback(
     (key: Item["key"]) => {
       if (key === "song") void runSong();
-      else runDraw();
+      else if (key === "draw") runDraw();
+      else {
+        replaceCommand(DIAGRAM_TEMPLATE);
+        close();
+      }
     },
-    [runSong, runDraw]
+    [runSong, runDraw, replaceCommand, close]
   );
 
   const handleKeyDown = useCallback(
