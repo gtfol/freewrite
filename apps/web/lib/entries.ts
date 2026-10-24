@@ -42,12 +42,21 @@ const dateFormat = new Intl.DateTimeFormat("en-US", {
   day: "numeric",
 });
 
+const dateWithYearFormat = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
 export function shortDate(timestamp: number): string {
   return dateFormat.format(new Date(timestamp));
 }
 
 export function entryDate(entry: Entry): string {
-  return shortDate(entry.createdAt);
+  const date = new Date(entry.createdAt);
+  return date.getFullYear() === new Date().getFullYear()
+    ? dateFormat.format(date)
+    : dateWithYearFormat.format(date);
 }
 
 export function entryPreview(entry: Entry): string {
