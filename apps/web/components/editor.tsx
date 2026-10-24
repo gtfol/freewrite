@@ -7,6 +7,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MarkdownPreview } from "@/components/markdown-preview";
 import { SplitPreviewHint } from "@/components/preview-hint";
 import { useSlashMenu } from "@/components/slash-menu";
+import { caretPoint } from "@/lib/caret";
+import { caretScrollDelta } from "@/lib/caret-scroll";
 import { fontById } from "@/lib/fonts";
 import { blankSketch, isBlank, paperFor, sketchRef } from "@/lib/sketch";
 import { currentEntry, usePrefs, useWriter } from "@/lib/store";
@@ -92,6 +94,37 @@ export function Editor() {
 
   const ref = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  const scrollFrame = useRef<number | null>(null);
+
+  const followCaret = useCallback(() => {
+    if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+    const editor = ref.current;
+    // Wait for React's value update and the browser's native caret scrolling.
+    scrollFrame.current = requestAnimationFrame(() => {
+      scrollFrame.current = null;
+      if (!editor || editor !== ref.current || document.activeElement !== editor) return;
+      const point = caretPoint(editor, editor.selectionEnd);
+      if (!point) return;
+      const rect = editor.getBoundingClientRect();
+      const style = getComputedStyle(editor);
+      const viewport = window.visualViewport;
+      const viewportTop = viewport?.offsetTop ?? 0;
+      const viewportBottom = viewportTop + (viewport?.height ?? window.innerHeight);
+      const toolbar = document.querySelector<HTMLElement>("[data-writing-toolbar]");
+      const visibleTop = Math.max(rect.top + (parseFloat(style.paddingTop) || 0), viewportTop + 8);
+      const visibleBottom = Math.min(
+        rect.bottom - (parseFloat(style.paddingBottom) || 0),
+        viewportBottom - point.lineHeight,
+        (toolbar?.getBoundingClientRect().top ?? viewportBottom) - point.lineHeight
+      );
+      const delta = caretScrollDelta(rect.top + point.top, point.lineHeight, visibleTop, visibleBottom);
+      if (delta !== 0) editor.scrollTop += delta;
+    });
+  }, []);
+
+  useEffect(() => () => {
+    if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+  }, [entry?.id, previewMode]);
   // The drawing the board is open on, if it is.
   const [drawing, setDrawing] = useState<string | null>(null);
   const slash = useSlashMenu(ref, { onDraw: setDrawing });
@@ -136,8 +169,9 @@ export function Editor() {
         setContent(next);
       }
       el.setSelectionRange(plan.caret, plan.caret);
+      followCaret();
     },
-    [setContent]
+    [setContent, followCaret]
   );
 
   const onKeyDown = useCallback(
@@ -152,7 +186,10 @@ export function Editor() {
       if (event.nativeEvent.isComposing) return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       // The / menu gets first refusal on Enter, Tab and Escape while it's open.
-      if (slash.handleKeyDown(event)) return;
+      if (slash.handleKeyDown(event)) {
+        followCaret();
+        return;
+      }
       const el = event.currentTarget;
       if (el.selectionStart !== el.selectionEnd) return;
 
@@ -168,7 +205,7 @@ export function Editor() {
       event.preventDefault();
       applyPlan(el, plan);
     },
-    [backspaceDisabled, applyPlan, slash]
+    [backspaceDisabled, applyPlan, slash, followCaret]
   );
 
   // Keep the preview roughly in step with where the writer is in the text.
@@ -191,7 +228,9 @@ export function Editor() {
       onChange={(e) => {
         setContent(e.target.value);
         slash.sync();
+        followCaret();
       }}
+      onCompositionEnd={followCaret}
       onKeyDown={onKeyDown}
       onBlur={slash.close}
       onScroll={previewMode === "split" ? onScroll : undefined}
