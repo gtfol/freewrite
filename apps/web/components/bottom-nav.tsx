@@ -63,6 +63,7 @@ export function BottomNav() {
 
   return (
     <nav
+      data-writing-toolbar
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       className={cn(
