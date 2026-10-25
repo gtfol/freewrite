@@ -42,13 +42,13 @@ Cleanup uses conservative English rules: obvious “um”/“uh”/“erm” fil
 
 Short information popovers explain dictation and backspace locking. Dictation and cleanup are entirely on-device; builds 1–2's optional remote cleanup implementation and key entry have been removed. Upgrading deletes that retired Keychain credential.
 
-Settings offers browser sign-in with the existing web account, opening freewrite on the web, sign-out, and confirmed account deletion. This login test build keeps entries local; signing in or out does not upload, reassign, or erase them. Sign-out revokes only this iPhone session. Account deletion removes the web account and its cloud data, with a typed confirmation that explains local writing remains.
+Settings offers browser sign-in with the existing web account, opening freewrite on the web, sign-out, and confirmed account deletion. Signing in syncs entries with the same web account. Never-owned local entries join the account you sign into; account entries remain assigned to that account and are hidden after sign-out. Sign-out revokes only this iPhone session. Account deletion removes the web account and its cloud data, with a typed confirmation that explains local writing remains.
 
 Settings links to terms of service, the privacy policy, and “contact us.” “Support freewrite” opens the same Stripe checkout as the web app. This external-payment link is shown only when StoreKit reports the US storefront, following [App Review 3.1.1(a)](https://developer.apple.com/app-store/review/guidelines/#in-app-purchase). Unknown or other storefronts hide the payment link; the contact and legal links remain available.
 
 ## Data and design
 
-SwiftData stores entries locally with the web fields `{id, content, createdAt, updatedAt, deletedAt}`. Dates encode as Unix milliseconds, IDs are strings, and deletion produces a tombstone. CloudKit is disabled. The OS may include local entries in device backups; entry sync is not included yet. Account sign-in uses a separate credential in this device’s Keychain.
+SwiftData stores entries locally with the web fields `{id, content, createdAt, updatedAt, deletedAt}`. Dates encode as Unix milliseconds, IDs are strings, and deletion produces a tombstone. CloudKit is disabled. The OS may include local entries in device backups; account entry sync runs after local saves, when opening history, and every 15 seconds while foregrounded. Offline edits persist until a successful sync. Account sign-in uses a separate credential in this device’s Keychain.
 
 The interface follows [gtfol's design standard](https://github.com/gtfol/ai/blob/main/DESIGN.md): system light/dark appearance, white/black canvas, monochrome text and line icons, open space, thin dividers, and a quiet bottom toolbar. [Lato Regular](Freewrite/Resources/Lato-Regular.ttf) is bundled under the [OFL](Freewrite/Resources/Lato-OFL.txt), with Dynamic Type.
 
@@ -69,7 +69,7 @@ The script builds the simulator and unsigned Release device targets, then runs t
 - `FreewriteTests`: core behavior, background audio callbacks, persistence, and retired-credential removal.
 - `scripts/generate-project.py`: standard-library-only generator; commit its `.xcodeproj` output.
 
-Only `Transcriber`, `TextCleaner`, and `EntryStore` are extension seams. Entry sync, reader, sharing, background capture, Siri/Shortcuts, driving mode, and other platforms are outside v1.
+Only `Transcriber`, `TextCleaner`, and `EntryStore` are extension seams. Reader, sharing, background capture, Siri/Shortcuts, driving mode, and other platforms are outside v1.
 
 See [verification](docs/verification.md) for simulator results, screenshots, and the physical-iPhone checklist.
 
@@ -86,3 +86,9 @@ The native network client uses an ephemeral session with no cookie or credential
 Both platforms use the `freewrite` PostHog project (626171, US). Native analytics runs only in Release builds on physical devices, never Debug, simulator, or unit tests. A closed event enum and a before-send property allowlist exclude user content, account IDs, names, email, screen names, and freeform errors. No identify calls, session replay, swizzling, automatic interaction capture, surveys, error capture, or feature-flag requests. Settings includes a persistent opt-out. Only random installation/session IDs and numeric app/SDK versions accompany explicit usage events.
 
 PostHog is pinned to 3.81.0 through the project generator. Regenerate the Xcode project after changing dependencies; commit its Package.resolved.
+
+## Entry sync
+
+Build 7 adds `/api/ios/sync`, authenticated by the existing native bearer token. It uses the same entry rows, hashes, revisions, and compare-and-swap writes as web sync. No server schema migration is required. The server computes web-compatible hashes and returns ten rows per page; the app batches up to twenty local changes within the request-size limit.
+
+SwiftData adds optional ownership and baseline fields plus an account-specific cursor through lightweight migration. Existing local writing is preserved. Offline saves remain immediate; acknowledgements apply only to the exact snapshot sent. Conflicting edits preserve the phone text in a separate entry before accepting the server version. Cursor, baselines, and conflict copies save together. Sync waits for dictation to finish, and account/token changes invalidate in-flight responses. History can be refreshed, and Settings offers sync status and manual retry. Reader articles and drawing rendering are not included in native entry sync.

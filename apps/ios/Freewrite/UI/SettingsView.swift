@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     var model: WriterModel
     @Environment(AccountModel.self) private var account
+    @Environment(EntrySyncModel.self) private var sync
     @State private var deletingUserID: String?
     @State private var deleteConfirmation = ""
     @State private var showDelete = false
@@ -77,7 +78,7 @@ struct SettingsView: View {
                 Text("account")
                 InfoButton(title: "account", paragraphs: [
                     "use the same account as freewrite on the web. your sign-in is stored securely on this iPhone.",
-                    "this test build supports signing in and out. entries still stay on this iPhone; cloud sync is coming next."
+                    "signing in syncs this iPhone’s writing with your web account. offline edits sync when you reconnect. signing out hides account entries on this device; they return when you sign back in."
                 ])
                 Spacer()
                 if account.busy { ProgressView().controlSize(.small) }
@@ -86,6 +87,23 @@ struct SettingsView: View {
                 Text(login.user.name.isEmpty ? login.user.email : login.user.name).padding(.top, 4)
                 Text(login.user.email).font(FreewriteStyle.caption).foregroundStyle(FreewriteStyle.secondary).textSelection(.enabled)
                 Link("open freewrite", destination: URL(string: "https://freewrite.gtfol.dev")!).frame(minHeight: 44)
+                Button(sync.syncing ? "syncing…" : "sync now") { Task { await sync.syncNow() } }
+                    .frame(minHeight: 44).disabled(sync.syncing || account.busy)
+                if let error = sync.error {
+                    Text(error).font(FreewriteStyle.caption).padding(.vertical, 8)
+                    if sync.needsSignIn {
+                        Button("sign in again") { Task {
+                            await account.refresh()
+                            if account.login == nil { await account.signIn() }
+                        } }.frame(minHeight: 44).disabled(account.busy)
+                    }
+                } else if let date = sync.lastSynced {
+                    Text("last synced \(date.formatted(date: .omitted, time: .shortened))")
+                        .font(FreewriteStyle.caption).foregroundStyle(FreewriteStyle.secondary)
+                }
+                if sync.preservedConflict {
+                    Text("both versions of a conflicting edit were saved in history.").font(FreewriteStyle.caption).padding(.vertical, 8)
+                }
                 Button("sign out") { Task { await account.signOut() } }.frame(minHeight: 44).disabled(account.busy)
                 Button("delete account", role: .destructive) {
                     deletingUserID = login.user.id; deleteConfirmation = ""; showDelete = true

@@ -100,3 +100,17 @@ test("oversized streamed exchange bodies fail before opening a database transact
   assert.equal((await f.handler(request("exchange", { code: "x".repeat(5000), code_verifier: verifier }), "exchange")).status, 413);
   assert.equal(f.queries.length, 0);
 });
+
+test("native sync refuses cookies, expired tokens, cross-origin requests and invalid batches", async () => {
+  const f = fixture();
+  const payload = { since: 0, changes: [] };
+  assert.equal((await f.handler(request("sync", payload, { cookie: "session=web" }), "sync")).status, 401);
+  const headers = { authorization: `Bearer ${token}` };
+  assert.equal((await f.handler(request("sync", payload, { ...headers, origin: "https://evil.test" }), "sync")).status, 403);
+  for (const value of [{ since: -1, changes: [] }, { since: 0, changes: [null] }, { since: 0, changes: Array(21).fill({}) }]) {
+    assert.equal((await f.handler(request("sync", value, headers), "sync")).status, 400);
+  }
+  assert.equal((await f.handler(request("sync", { since: 0, changes: [], pad: "x".repeat(4_000_000) }, headers), "sync")).status, 413);
+  assert.equal(f.released(), 0);
+  f.expire(); assert.equal((await f.handler(request("sync", payload, headers), "sync")).status, 401);
+});

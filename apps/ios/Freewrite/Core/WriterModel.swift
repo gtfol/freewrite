@@ -13,6 +13,7 @@ import Observation
     private(set) var cleanupUndo: CleanupUndo?
     let timer = SessionTimer()
     var backspaceLocked = false
+    var didSave: (@MainActor () -> Void)?
     private let store: any EntryStore
     private let transcriber: any Transcriber
     private let cleaner: any TextCleaner
@@ -47,6 +48,24 @@ import Observation
         } catch { saveFailed = true }
     }
 
+    func reloadAfterSync(preserved: [String: String] = [:], accountChanged: Bool = false) {
+        guard !dirty, !active else { return }
+        do {
+            let refreshed = try store.entries()
+            let previous = current
+            let selectedID = previous.map { preserved[$0.id] ?? $0.id }
+            entries = refreshed
+            current = accountChanged ? entries.first : entries.first { $0.id == selectedID }
+            if current == nil { current = entries.first }
+            if current == nil { newEntry() }
+            if previous?.id != current?.id || previous?.content != current?.content {
+                cleanupUndo = nil
+                selection = NSRange(location: min(selection.location, text.utf16.count), length: 0)
+            }
+            defaults.set(current?.id, forKey: "lastEntryID")
+        } catch { saveFailed = true }
+    }
+
     func setBackspaceLocked(_ locked: Bool) {
         backspaceLocked = locked
         defaults.set(locked, forKey: "backspaceLocked")
@@ -57,7 +76,9 @@ import Observation
         guard let current else { return !saveFailed }
         do {
             try store.save(current)
+            let changed = dirty
             dirty = false; saveFailed = false
+            if changed { didSave?() }
             return true
         } catch { saveFailed = true; return false }
     }
@@ -85,6 +106,7 @@ import Observation
         abandonDictation()
         let entry = Entry()
         do { try store.save(entry) } catch { saveFailed = true; return }
+        didSave?()
         track(.entryCreated)
         entries.insert(entry, at: 0); current = entry; selection = NSRange(location: 0, length: 0)
         defaults.set(entry.id, forKey: "lastEntryID"); cleanupUndo = nil; notice = nil
@@ -101,6 +123,7 @@ import Observation
         guard flush() else { return }
         var deleted = entry; deleted.content = ""; deleted.deletedAt = Entry.timestamp(); deleted.updatedAt = deleted.deletedAt!
         do { try store.save(deleted) } catch { saveFailed = true; return }
+        didSave?()
         entries.removeAll { $0.id == entry.id }
         if current?.id == entry.id {
             abandonDictation(); current = nil; cleanupUndo = nil

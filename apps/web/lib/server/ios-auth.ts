@@ -1,5 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Pool } from "pg";
+import { asEntry, entryRow, pushEntry, ENTRY_COLS } from "./entry-sync.ts";
+import type { Entry, SyncChange } from "../types.ts";
 import { deleteAccount } from "./account-deletion.ts";
 
 export const IOS_CALLBACK = "dev.gtfol.freewrite://auth/callback";
@@ -23,7 +25,7 @@ export function iosAuthorization(value: Record<string, unknown>) {
     ? { code_challenge, state } : null;
 }
 
-async function body(request: Request): Promise<Record<string, unknown>> {
+async function body(request: Request, limit = 2048): Promise<Record<string, unknown>> {
   if (request.headers.get("content-type")?.split(";")[0].trim() !== "application/json") throw new AuthError("send a JSON request.", 415);
   const reader = request.body?.getReader();
   if (!reader) throw new AuthError("invalid request.");
@@ -33,7 +35,7 @@ async function body(request: Request): Promise<Record<string, unknown>> {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > 2048) { await reader.cancel(); throw new AuthError("request is too large.", 413); }
+      if (size > limit) { await reader.cancel(); throw new AuthError("request is too large.", 413); }
       chunks.push(value);
     }
     const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -114,6 +116,31 @@ export function createIOSAuth(pool: Pool, sessionFor: (request: Request) => Prom
         return reply({ signedOut: true });
       }
       return reply({ user: { id: user.id, name: user.name, email: user.email }, expiresAt: user.expiresAt });
+    },
+    async sync(request: Request) {
+      const user = await authenticated(request);
+      const values = await body(request, 4_000_000);
+      if (!Number.isSafeInteger(values.since) || (values.since as number) < 0 ||
+          !Array.isArray(values.changes) || values.changes.length > 20) throw new AuthError("invalid sync request.");
+      const changes: SyncChange<Entry>[] = [];
+      const ids = new Set<string>();
+      for (const item of values.changes) {
+        const record = asEntry(item?.record);
+        if (!record || !Number.isSafeInteger(item.baseRev) || item.baseRev < 0 || ids.has(record.id)) throw new AuthError("invalid entry.");
+        ids.add(record.id);
+        changes.push({ record, baseRev: item.baseRev, hash: digest(JSON.stringify([record.content, record.deletedAt ? 1 : 0])) });
+      }
+      const client = await pool.connect();
+      try {
+        await client.query("begin");
+        const results = [];
+        for (const change of changes) results.push(await pushEntry(client, user.id, change));
+        const { rows } = await client.query(`select ${ENTRY_COLS} from entries where user_id=$1 and seq>$2 order by seq asc limit 11`, [user.id, values.since]);
+        const page = rows.slice(0, 10).map(entryRow);
+        await client.query("commit");
+        return reply({ results, rows: page, cursor: page.at(-1)?.rev ?? values.since, hasMore: rows.length > 10 });
+      } catch (error) { await client.query("rollback").catch(() => {}); throw error; }
+      finally { client.release(); }
     },
     async account(request: Request) {
       const user = await authenticated(request);

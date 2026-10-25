@@ -3,6 +3,8 @@ import SwiftUI
 struct WriteView: View {
     @Bindable var model: WriterModel
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(AccountModel.self) private var account
+    @Environment(EntrySyncModel.self) private var sync
     @State private var history = false
     @State private var settings = false
 
@@ -63,6 +65,15 @@ struct WriteView: View {
         .freewriteScreen()
         .sheet(isPresented: $history) { HistoryView(model: model).presentationBackground(FreewriteStyle.canvas) }
         .sheet(isPresented: $settings) { SettingsView(model: model).presentationBackground(FreewriteStyle.canvas) }
+        .onChange(of: account.login) { _, _ in _ = sync.accountChanged() }
+        .task(id: account.login) { await sync.syncNow() }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            while !Task.isCancelled {
+                await sync.syncNow()
+                do { try await Task.sleep(for: .seconds(15)) } catch { return }
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { model.background() }
             if phase == .active { model.timer.tick() }

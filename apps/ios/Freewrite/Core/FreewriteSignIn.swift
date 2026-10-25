@@ -60,7 +60,9 @@ private final class AccountRedirectBlocker: NSObject, URLSessionTaskDelegate, Se
 }
 struct AccountURLSessionTransport: AccountTransport {
     private let session: URLSession
-    init() {
+    private let maxResponseBytes: Int
+    init(maxResponseBytes: Int = 64_000) {
+        self.maxResponseBytes = maxResponseBytes
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil; configuration.urlCredentialStorage = nil; configuration.urlCache = nil
         configuration.timeoutIntervalForRequest = 30; configuration.timeoutIntervalForResource = 45
@@ -68,7 +70,7 @@ struct AccountURLSessionTransport: AccountTransport {
     }
     func send(_ request: URLRequest) async throws -> AccountHTTPResult {
         let (data, response) = try await session.data(for: request)
-        guard let response = response as? HTTPURLResponse, data.count <= 64_000 else { throw SignInError.unavailable }
+        guard let response = response as? HTTPURLResponse, data.count <= maxResponseBytes else { throw SignInError.unavailable }
         return AccountHTTPResult(data: data, status: response.statusCode)
     }
 }
