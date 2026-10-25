@@ -136,9 +136,18 @@ export function createIOSAuth(pool: Pool, sessionFor: (request: Request) => Prom
         const results = [];
         for (const change of changes) results.push(await pushEntry(client, user.id, change));
         const { rows } = await client.query(`select ${ENTRY_COLS} from entries where user_id=$1 and seq>$2 order by seq asc limit 11`, [user.id, values.since]);
-        const page = rows.slice(0, 10).map(entryRow);
+        // A conflict can include a full entry. Budget it together with pull rows
+        // so large histories remain below the hosting response-size limit.
+        let bytes = Buffer.byteLength(JSON.stringify(results)) + 1024;
+        if (bytes > 4_000_000) throw new AuthError("sync fewer entries at once.", 413);
+        const page = [];
+        for (const row of rows.slice(0, 10).map(entryRow)) {
+          const size = Buffer.byteLength(JSON.stringify(row)) + 1;
+          if (bytes + size > 4_000_000) break;
+          page.push(row); bytes += size;
+        }
         await client.query("commit");
-        return reply({ results, rows: page, cursor: page.at(-1)?.rev ?? values.since, hasMore: rows.length > 10 });
+        return reply({ results, rows: page, cursor: page.at(-1)?.rev ?? values.since, hasMore: rows.length > page.length });
       } catch (error) { await client.query("rollback").catch(() => {}); throw error; }
       finally { client.release(); }
     },
