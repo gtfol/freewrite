@@ -70,6 +70,18 @@ test("native and web entry sync share revisions, conflicts, deletions and accoun
       const collision = await (await sync("bob", 0, [{ record: { ...phoneEdit, content: "wrong account" }, baseRev: 0 }])).json();
       assert.deepEqual(collision.rows, []);
       assert.equal((await pool.query("select content from entries where id=$1", [phoneEdit.id])).rows[0].content, "");
+      // Escaped text grows in JSON: page by bytes as well as record count.
+      for (let i = 0; i < 5; i++) {
+        const record: Entry = { id: randomUUID(), content: "\n".repeat(500_000), createdAt: i, updatedAt: i, deletedAt: null };
+        await pushEntry(client, "bob", { record, baseRev: 0, hash: hash(record) });
+      }
+      const largeResponse = await sync("bob", 0);
+      const largeText = await largeResponse.text();
+      assert.ok(Buffer.byteLength(largeText) < 4_000_000);
+      const largePage = JSON.parse(largeText);
+      assert.equal(largePage.rows.length, 3); assert.equal(largePage.hasMore, true);
+      const remaining = await (await sync("bob", largePage.cursor)).json();
+      assert.equal(remaining.rows.length, 2); assert.equal(remaining.hasMore, false);
       await pool.query('update "session" set "expiresAt"=now()-interval \'1 second\' where id=\'alice\'');
       assert.equal((await sync("alice", 0)).status, 401);
     } finally { client.release(); }
