@@ -3,6 +3,7 @@ import SwiftData
 
 @main struct FreewriteApp: App {
     @State private var model: WriterModel?
+    @State private var sync: EntrySyncModel?
     @State private var loadError = false
     @State private var account = AccountModel(credentials: AccountCredentialStore(),
                                              client: FreewriteAccountClient(transport: AccountURLSessionTransport()),
@@ -11,7 +12,7 @@ import SwiftData
     var body: some Scene {
         WindowGroup {
             Group {
-                if let model { WriteView(model: model).environment(account) }
+                if let model, let sync { WriteView(model: model).environment(account).environment(sync) }
                 else {
                     VStack(spacing: 20) {
                         Text(loadError ? "your entries couldn’t be opened." : "opening freewrite…")
@@ -27,8 +28,14 @@ import SwiftData
             let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
                                                        appropriateFor: nil, create: true)
             let configuration = ModelConfiguration(url: support.appendingPathComponent("default.store"), cloudKitDatabase: .none)
-            let container = try ModelContainer(for: StoredEntry.self, configurations: configuration)
-            model = WriterModel(store: SwiftDataEntryStore(container: container), transcriber: AppleTranscriber(), track: Analytics.track)
+            let container = try ModelContainer(for: StoredEntry.self, StoredSyncCursor.self, configurations: configuration)
+            let store = SwiftDataEntryStore(container: container)
+            // Select ownership before loading so cached account entries stay available offline.
+            try store.switchAccount(to: account.login?.user.id)
+            let writer = WriterModel(store: store, transcriber: AppleTranscriber(), track: Analytics.track)
+            model = writer
+            sync = EntrySyncModel(store: store, writer: writer, account: account,
+                                  client: EntrySyncClient(transport: AccountURLSessionTransport(maxResponseBytes: 32_000_000)))
             loadError = false
         } catch { loadError = true }
     }

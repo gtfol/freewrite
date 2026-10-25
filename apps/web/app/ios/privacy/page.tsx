@@ -8,18 +8,18 @@ export default function IOSPrivacyPage() {
     <main className="mx-auto max-w-[650px] px-6 py-14 text-sm leading-7">
       <Link href="/" className="text-muted-foreground">freewrite</Link>
       <h1 className="mt-8 text-2xl">Privacy on iPhone</h1>
-      <p className="mt-3 text-muted-foreground">Updated September 24, 2026 · gtfol, LLC</p>
+      <p className="mt-3 text-muted-foreground">Updated October 25, 2026 · gtfol, LLC</p>
       <div className="mt-8 space-y-6">
-        <p>This page describes the native freewrite iPhone app. You can optionally sign in with your web account; entry sync is not yet included in this iPhone test build.</p>
+        <p>This page describes the native freewrite iPhone app. You can optionally sign in with your web account to sync your writing between iPhone and web.</p>
         <section>
-          <h2 className="text-base">Your writing stays on your iPhone</h2>
-          <p>Entries and drafts are saved in the app’s local database. This version does not sync entries and has no advertising. Your entries may be included in device backups according to your Apple settings.</p>
-          <p>Deleting an entry clears its text from the app’s database and retains an empty deletion record. Removing the app removes its local data; any device backups are managed separately through your Apple settings.</p>
+          <h2 className="text-base">Your writing and sync</h2>
+          <p>Entries and drafts are saved in the app’s local database. While signed in, entry text and dates sync through our hosting and database providers so they are available on your other devices. Offline changes save locally and sync when you reconnect. The app has no advertising. Your entries may be included in device backups according to your Apple settings.</p>
+          <p>Deleting an entry clears its text and retains an empty deletion record; while signed in, that deletion also syncs to your account. If devices make conflicting edits, the app preserves a separate copy of unsynced writing. Removing the app removes its local data; any device backups are managed separately through your Apple settings.</p>
         </section>
         <section>
           <h2 className="text-base">Optional account connection</h2>
           <p>Sign-in opens the system authentication browser and uses the same Google account connection as the website. freewrite stores your account name, email address, and account identifier to provide your account. Our hosting and database providers process these details for us. The app stores its sign-in credential in this iPhone’s Keychain; it is not included in iCloud Keychain or transferred to another device.</p>
-          <p>Signing in does not upload your local writing or audio. You can sign out in Settings to revoke this iPhone’s session. Sessions expire after 90 days. “Delete account” permanently removes your web account, its sessions, and synced writing, articles, and drawings from our database. Writing saved only on this iPhone remains until you delete it locally or remove the app; existing device backups and copies shared with others are separate.</p>
+          <p>Signing in uploads writing saved without an account to the account you choose. Entries already assigned to an account are never reassigned to a different account. Audio is never uploaded. You can sign out in Settings to revoke this iPhone’s session and hide its cached account entries. The cache remains on this device and becomes available when you sign back into the same account. Sessions expire after 90 days. “Delete account” permanently removes your web account, its sessions, and synced writing, articles, and drawings from our database. Writing saved only on this iPhone remains until you delete it locally or remove the app; existing device backups and copies shared with others are separate.</p>
         </section>
         <section>
           <h2 className="text-base">On-device dictation</h2>

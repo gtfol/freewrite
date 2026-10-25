@@ -2,13 +2,16 @@ import SwiftUI
 
 struct HistoryView: View {
     var model: WriterModel
+    @Environment(AccountModel.self) private var account
+    @Environment(EntrySyncModel.self) private var sync
     @Environment(\.dismiss) private var dismiss
     @State private var deleting: Entry?
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(title: "history")
-            Text("saved on this iPhone").font(FreewriteStyle.caption).foregroundStyle(FreewriteStyle.secondary)
+            Text(account.login == nil ? "saved on this iPhone" : "saved on this iPhone · account sync enabled").font(FreewriteStyle.caption).foregroundStyle(FreewriteStyle.secondary)
                 .padding(.horizontal, 20).padding(.bottom, 20)
+            if let error = sync.error { Text(error).font(FreewriteStyle.caption).padding(.horizontal, 20) }
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(model.entries) { entry in
@@ -33,6 +36,8 @@ struct HistoryView: View {
             }
             if model.saveFailed { Text(WritingError.storage.localizedDescription).font(FreewriteStyle.caption).padding(20) }
         }.freewriteScreen()
+        .task { await sync.syncNow() }
+        .refreshable { await sync.syncNow() }
         .confirmationDialog("delete this entry?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("delete entry", role: .destructive) { if let entry = deleting { model.delete(entry) }; deleting = nil }
             Button("cancel", role: .cancel) { deleting = nil }
